@@ -1,7 +1,7 @@
 import { Injectable, Inject, ConflictException, NotFoundException } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { eq, count, countDistinct } from 'drizzle-orm';
 import { DATABASE_CONNECTION } from '@/database/database.module';
-import { profiles } from '@/database/schema';
+import { profiles, likes, comments, playlists, readingHistory, bookmarks } from '@/database/schema';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '@/database/schema';
 import { CreateProfileDto, UpdateProfileDto } from './profile.dto';
@@ -91,5 +91,23 @@ export class ProfileService {
 
   async delete(profileId: string) {
     await this.db.delete(profiles).where(eq(profiles.id, profileId));
+  }
+
+  async getStats(profileId: string) {
+    const [likesResult, commentsResult, playlistsResult, readingResult, bookmarksResult] = await Promise.all([
+      this.db.select({ count: count() }).from(likes).where(eq(likes.profileId, profileId)),
+      this.db.select({ count: count() }).from(comments).where(eq(comments.profileId, profileId)),
+      this.db.select({ count: count() }).from(playlists).where(eq(playlists.profileId, profileId)),
+      this.db.select({ count: countDistinct(readingHistory.comicId) }).from(readingHistory).where(eq(readingHistory.profileId, profileId)),
+      this.db.select({ count: count() }).from(bookmarks).where(eq(bookmarks.profileId, profileId)),
+    ]);
+
+    return {
+      likesCount: likesResult[0]?.count ?? 0,
+      commentsCount: commentsResult[0]?.count ?? 0,
+      playlistsCount: playlistsResult[0]?.count ?? 0,
+      comicsReadCount: readingResult[0]?.count ?? 0,
+      bookmarksCount: bookmarksResult[0]?.count ?? 0,
+    };
   }
 }

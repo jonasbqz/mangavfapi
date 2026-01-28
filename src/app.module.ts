@@ -9,6 +9,10 @@ import { ChapterModule } from './modules/chapter/chapter.module';
 import { BookmarkModule } from './modules/bookmark/bookmark.module';
 import { ReadingHistoryModule } from './modules/reading-history/reading-history.module';
 import { ScraperModule } from './modules/scraper/scraper.module';
+import { LikesModule } from './modules/likes/likes.module';
+import { CommentsModule } from './modules/comments/comments.module';
+import { PlaylistsModule } from './modules/playlists/playlists.module';
+import { DownloadsModule } from './modules/downloads/downloads.module';
 
 @Module({
   imports: [
@@ -25,6 +29,10 @@ import { ScraperModule } from './modules/scraper/scraper.module';
     BookmarkModule,
     ReadingHistoryModule,
     ScraperModule,
+    LikesModule,
+    CommentsModule,
+    PlaylistsModule,
+    DownloadsModule,
   ],
 })
 export class AppModule {}

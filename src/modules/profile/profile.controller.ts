@@ -45,6 +45,14 @@ export class ProfileController {
     return profile;
   }
 
+  @Get('me/stats')
+  @UseGuards(AuthGuard, ProfileGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get current user statistics' })
+  async getMyStats(@CurrentUser() user: UserSession) {
+    return this.profileService.getStats(user.profileId!);
+  }
+
   @Put('me')
   @UseGuards(AuthGuard, ProfileGuard)
   @ApiBearerAuth()
