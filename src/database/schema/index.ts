@@ -155,10 +155,69 @@ export const readingHistory = pgTable('reading_history', {
   readAtIdx: index('reading_history_read_at_idx').on(table.readAt),
 }));
 
+// Likes - Para trackear qué usuario dio like a qué comic
+export const likes = pgTable('likes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  profileId: uuid('profile_id').references(() => profiles.id, { onDelete: 'cascade' }).notNull(),
+  comicId: integer('comic_id').references(() => comics.id, { onDelete: 'cascade' }).notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => ({
+  profileComicIdx: uniqueIndex('likes_profile_comic_idx').on(table.profileId, table.comicId),
+  profileIdx: index('likes_profile_idx').on(table.profileId),
+  comicIdx: index('likes_comic_idx').on(table.comicId),
+}));
+
+// Comments - Sistema de comentarios con respuestas anidadas
+export const comments = pgTable('comments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  profileId: uuid('profile_id').references(() => profiles.id, { onDelete: 'cascade' }).notNull(),
+  comicId: integer('comic_id').references(() => comics.id, { onDelete: 'cascade' }).notNull(),
+  chapterId: integer('chapter_id').references(() => chapters.id, { onDelete: 'cascade' }),
+  parentId: uuid('parent_id'),
+  content: text('content').notNull(),
+  isEdited: boolean('is_edited').default(false),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (table) => ({
+  profileIdx: index('comments_profile_idx').on(table.profileId),
+  comicIdx: index('comments_comic_idx').on(table.comicId),
+  chapterIdx: index('comments_chapter_idx').on(table.chapterId),
+  parentIdx: index('comments_parent_idx').on(table.parentId),
+}));
+
+// Playlists - Listas personalizadas de comics
+export const playlists = pgTable('playlists', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  profileId: uuid('profile_id').references(() => profiles.id, { onDelete: 'cascade' }).notNull(),
+  name: varchar('name', { length: 100 }).notNull(),
+  description: text('description'),
+  isPublic: boolean('is_public').default(false),
+  coverImage: varchar('cover_image', { length: 500 }),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (table) => ({
+  profileIdx: index('playlists_profile_idx').on(table.profileId),
+}));
+
+// Playlist Items - Comics dentro de las playlists
+export const playlistItems = pgTable('playlist_items', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  playlistId: uuid('playlist_id').references(() => playlists.id, { onDelete: 'cascade' }).notNull(),
+  comicId: integer('comic_id').references(() => comics.id, { onDelete: 'cascade' }).notNull(),
+  order: integer('order').default(0),
+  addedAt: timestamp('added_at').defaultNow(),
+}, (table) => ({
+  playlistComicIdx: uniqueIndex('playlist_items_playlist_comic_idx').on(table.playlistId, table.comicId),
+  playlistIdx: index('playlist_items_playlist_idx').on(table.playlistId),
+}));
+
 // Relations
 export const profilesRelations = relations(profiles, ({ many }) => ({
   bookmarks: many(bookmarks),
   readingHistory: many(readingHistory),
+  likes: many(likes),
+  comments: many(comments),
+  playlists: many(playlists),
 }));
 
 export const comicsRelations = relations(comics, ({ many }) => ({
@@ -166,6 +225,9 @@ export const comicsRelations = relations(comics, ({ many }) => ({
   comicGenres: many(comicGenres),
   bookmarks: many(bookmarks),
   readingHistory: many(readingHistory),
+  likes: many(likes),
+  comments: many(comments),
+  playlistItems: many(playlistItems),
 }));
 
 export const comicScansRelations = relations(comicScans, ({ one, many }) => ({
@@ -177,6 +239,7 @@ export const comicScansRelations = relations(comicScans, ({ one, many }) => ({
 export const chaptersRelations = relations(chapters, ({ one, many }) => ({
   comicScan: one(comicScans, { fields: [chapters.comicScanId], references: [comicScans.id] }),
   readingHistory: many(readingHistory),
+  comments: many(comments),
 }));
 
 export const bookmarksRelations = relations(bookmarks, ({ one }) => ({
@@ -201,4 +264,31 @@ export const comicGenresRelations = relations(comicGenres, ({ one }) => ({
 
 export const scanGroupsRelations = relations(scanGroups, ({ many }) => ({
   comicScans: many(comicScans),
+}));
+
+// Likes relations
+export const likesRelations = relations(likes, ({ one }) => ({
+  profile: one(profiles, { fields: [likes.profileId], references: [profiles.id] }),
+  comic: one(comics, { fields: [likes.comicId], references: [comics.id] }),
+}));
+
+// Comments relations
+export const commentsRelations = relations(comments, ({ one, many }) => ({
+  profile: one(profiles, { fields: [comments.profileId], references: [profiles.id] }),
+  comic: one(comics, { fields: [comments.comicId], references: [comics.id] }),
+  chapter: one(chapters, { fields: [comments.chapterId], references: [chapters.id] }),
+  parent: one(comments, { fields: [comments.parentId], references: [comments.id], relationName: 'parentChild' }),
+  replies: many(comments, { relationName: 'parentChild' }),
+}));
+
+// Playlists relations
+export const playlistsRelations = relations(playlists, ({ one, many }) => ({
+  profile: one(profiles, { fields: [playlists.profileId], references: [profiles.id] }),
+  items: many(playlistItems),
+}));
+
+// Playlist Items relations
+export const playlistItemsRelations = relations(playlistItems, ({ one }) => ({
+  playlist: one(playlists, { fields: [playlistItems.playlistId], references: [playlists.id] }),
+  comic: one(comics, { fields: [playlistItems.comicId], references: [comics.id] }),
 }));
