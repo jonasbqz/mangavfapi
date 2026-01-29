@@ -1,7 +1,7 @@
 import { Logger } from '@nestjs/common';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '@/database/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import { comics, chapters, comicScans, scanGroups, genres, comicGenres } from '@/database/schema';
 import type { ScrapedComic, ScrapedChapter, ChapterListItem, ScraperResult } from '../scraper.types';
 
@@ -29,16 +29,17 @@ export class OlympusAdapter {
       // Ensure scan group exists
       await this.ensureScanGroup();
 
-      // Get comic URLs from recent updates
-      const comicUrls = await this.getRecentComicUrls(startPage, endPage);
-      this.logger.log(`Found ${comicUrls.length} comics to scrape`);
+      const startTime = Date.now();
+      const comicInfos = await this.getRecentComicUrls(startPage, endPage);
+      const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+      this.logger.log(`Found ${comicInfos.length} comics to scrape (took ${duration}s)`);
 
-      for (const url of comicUrls) {
+      for (const { url, olympusId } of comicInfos) {
         try {
-          await this.scrapeComic(url, result);
+          await this.scrapeComic(url, olympusId, result);
           await this.delay();
         } catch (error) {
-          const msg = `Failed to scrape comic ${url}: ${error}`;
+          const msg = `Failed to scrape comic ${url} (ID: ${olympusId}): ${error}`;
           this.logger.error(msg);
           result.errors.push(msg);
         }
@@ -71,9 +72,9 @@ export class OlympusAdapter {
     this.scanGroupId = created.id;
   }
 
-  private async getRecentComicUrls(startPage: number, endPage: number): Promise<string[]> {
-    const urls: string[] = [];
-    const seen = new Set<string>();
+  private async getRecentComicUrls(startPage: number, endPage: number): Promise<{ url: string; olympusId: string }[]> {
+    const comics: { url: string; olympusId: string }[] = [];
+    const seenIds = new Set<string>();
 
     for (let page = startPage; page <= endPage; page++) {
       try {
@@ -87,24 +88,29 @@ export class OlympusAdapter {
           // Skip novels
           if (item.type?.toLowerCase() === 'novel') continue;
 
+          // Use Olympus ID to identify comics (not slug which changes)
+          const olympusId = String(item.id);
           const slug = item.slug;
-          if (slug && !seen.has(slug)) {
-            seen.add(slug);
-            urls.push(`${OLYMPUS_API}/series/${slug}`);
+
+          if (olympusId && slug && !seenIds.has(olympusId)) {
+            seenIds.add(olympusId);
+            comics.push({
+              url: `${OLYMPUS_API}/series/${slug}`,
+              olympusId,
+            });
           }
         }
-
-        await this.delay();
+        await this.delay(500); // Shorter delay for update page discovery
       } catch (error) {
         this.logger.error(`Failed to fetch page ${page}: ${error}`);
         break;
       }
     }
 
-    return urls;
+    return comics;
   }
 
-  private async scrapeComic(apiUrl: string, result: ScraperResult): Promise<void> {
+  private async scrapeComic(apiUrl: string, olympusId: string, result: ScraperResult): Promise<void> {
     const response = await this.fetchJson<OlympusApiResponse>(apiUrl);
     const data = response.data;
 
@@ -112,25 +118,93 @@ export class OlympusAdapter {
       throw new Error('Incomplete comic data');
     }
 
-    const comic = this.parseComic(data);
-    this.logger.log(`Scraping comic: ${comic.title}`);
+    // Ensure the ID from the API matches what we expect
+    const actualOlympusId = String(data.id);
+    if (actualOlympusId !== olympusId) {
+      this.logger.warn(`Olympus ID mismatch: expected ${olympusId}, got ${actualOlympusId}`);
+    }
 
-    // Upsert comic
-    const comicId = await this.upsertComic(comic);
+    const comic = this.parseComic(data);
+    this.logger.log(`Scraping comic: ${comic.title} (Olympus ID: ${actualOlympusId})`);
+
+    // Upsert comic and get comicScanId
+    const { comicId, comicScanId } = await this.upsertComic(comic);
     result.comics++;
 
-    // Get and save chapters
-    const chapterList = await this.getChapterList(data.slug);
-    this.logger.log(`Found ${chapterList.length} chapters for ${comic.title}`);
+    // Get existing chapter numbers from DB first (ONE query)
+    const existingChapters = await this.db.query.chapters.findMany({
+      where: eq(chapters.comicScanId, comicScanId),
+      columns: { chapterNumber: true },
+    });
+    const existingNumbers = new Set(existingChapters.map(ch => ch.chapterNumber));
+    this.logger.log(`Comic has ${existingNumbers.size} chapters in DB`);
 
-    for (const chapterItem of chapterList) {
+    // Collect missing chapters by paginating until all chapters on a page exist
+    const missingChapters: ChapterListItem[] = [];
+    let page = 1;
+    const maxPages = 50; // Safety limit
+
+    while (page <= maxPages) {
+      const chaptersUrl = `${OLYMPUS_API}/series/${data.slug}/chapters?page=${page}&direction=desc&type=comic`;
+      const chaptersResponse = await this.fetchJson<OlympusApiResponse>(chaptersUrl);
+
+      if (!chaptersResponse.data || !Array.isArray(chaptersResponse.data) || chaptersResponse.data.length === 0) {
+        break; // No more pages
+      }
+
+      // Parse chapters from this page
+      const pageChapters: ChapterListItem[] = chaptersResponse.data
+        .filter((item: any) => item.name && item.id)
+        .map((item: any) => ({
+          id: String(item.id),
+          title: item.name,
+          number: item.name,
+          url: `${OLYMPUS_API}/series/${data.slug}/chapters/${item.id}`,
+          pathname: String(item.id),
+          releaseDate: item.published_at ? new Date(item.published_at) : undefined,
+        }));
+
+      // Check which chapters from this page are missing
+      const pageMissing = pageChapters.filter(ch => {
+        const chapterNum = this.parseChapterNumber(ch.number);
+        return !existingNumbers.has(chapterNum);
+      });
+
+      if (pageMissing.length === 0) {
+        // All chapters on this page already exist - we're caught up
+        this.logger.log(`Page ${page}: All ${pageChapters.length} chapters exist, stopping pagination`);
+        break;
+      }
+
+      this.logger.log(`Page ${page}: Found ${pageMissing.length}/${pageChapters.length} missing chapters`);
+      missingChapters.push(...pageMissing);
+
+      // Check if there's a next page
+      if (!chaptersResponse.links?.next) {
+        break;
+      }
+
+      page++;
+      await this.delay(200); // Short delay between page fetches
+    }
+
+    if (missingChapters.length === 0) {
+      this.logger.log(`No new chapters for ${comic.title}`);
+      return;
+    }
+
+    this.logger.log(`Total: ${missingChapters.length} new chapters to add for ${comic.title}`);
+
+    // Only fetch pages for missing chapters
+    for (const chapterItem of missingChapters) {
       try {
         const chapter = await this.scrapeChapter(data.slug, chapterItem.id);
         if (chapter.pages.length > 0) {
-          await this.upsertChapter(comicId, chapter, chapterItem);
+          await this.insertChapter(comicScanId, chapter, chapterItem);
           result.chapters++;
+          this.logger.log(`Added chapter ${chapter.chapterNumber} for ${comic.title}`);
         }
-        await this.delay(500); // Shorter delay for chapters
+        await this.delay(300); // Short delay between chapter page fetches
       } catch (error) {
         this.logger.warn(`Failed to scrape chapter ${chapterItem.id}: ${error}`);
       }
@@ -179,39 +253,6 @@ export class OlympusAdapter {
     };
   }
 
-  private async getChapterList(slug: string): Promise<ChapterListItem[]> {
-    const allChapters: ChapterListItem[] = [];
-    let page = 1;
-
-    while (page <= 100) {
-      const url = `${OLYMPUS_API}/series/${slug}/chapters?page=${page}&direction=asc&type=comic`;
-      const response = await this.fetchJson<OlympusApiResponse>(url);
-
-      if (!response.data || !Array.isArray(response.data) || response.data.length === 0) {
-        break;
-      }
-
-      for (const item of response.data) {
-        if (!item.name || !item.id) continue;
-
-        allChapters.push({
-          id: String(item.id),
-          title: item.name,
-          number: item.name,
-          url: `${OLYMPUS_API}/series/${slug}/chapters/${item.id}`,
-          pathname: String(item.id),
-          releaseDate: item.published_at ? new Date(item.published_at) : undefined,
-        });
-      }
-
-      if (!response.links?.next) break;
-      page++;
-      await this.delay(300);
-    }
-
-    return allChapters;
-  }
-
   private async scrapeChapter(slug: string, chapterId: string): Promise<ScrapedChapter> {
     const url = `${OLYMPUS_API}/series/${slug}/chapters/${chapterId}`;
     const response = await this.fetchJson<any>(url);
@@ -234,55 +275,109 @@ export class OlympusAdapter {
     };
   }
 
-  private async upsertComic(comic: ScrapedComic): Promise<number> {
-    // Check if comic exists
-    const existing = await this.db.query.comics.findFirst({
-      where: eq(comics.slug, comic.slug),
-    });
+  private async upsertComic(comic: ScrapedComic): Promise<{ comicId: number; comicScanId: number }> {
+    const externalUrl = `${OLYMPUS_ORIGIN}/series/${comic.slug}`;
+
+    // First, check if we already have this comic via externalId (Olympus ID) in comicScans
+    let existingComicScan = null;
+    if (comic.id) {
+      existingComicScan = await this.db.query.comicScans.findFirst({
+        where: and(
+          eq(comicScans.externalId, comic.id),
+          eq(comicScans.scanGroupId, this.scanGroupId!),
+        ),
+        with: { comic: true },
+      });
+    }
 
     let comicId: number;
+    let comicScanId: number;
 
-    if (existing) {
+    if (existingComicScan?.comic) {
+      // Comic already exists via externalId (Olympus ID) - update it
       await this.db.update(comics).set({
         title: comic.title,
         titleAlternative: comic.titleAlternative,
+        slug: comic.slug, // Update slug in case it changed
         description: comic.description,
         author: comic.author,
         coverImage: comic.coverImage,
         type: comic.type === 'comic' ? 'manga' : comic.type,
         status: comic.status,
         updatedAt: new Date(),
-      }).where(eq(comics.id, existing.id));
-      comicId = existing.id;
-    } else {
-      const [created] = await this.db.insert(comics).values({
-        title: comic.title,
-        slug: comic.slug,
-        titleAlternative: comic.titleAlternative,
-        description: comic.description,
-        author: comic.author,
-        coverImage: comic.coverImage,
-        type: comic.type === 'comic' ? 'manga' : comic.type,
-        status: comic.status,
-      }).returning();
-      comicId = created.id;
-    }
+      }).where(eq(comics.id, existingComicScan.comic.id));
 
-    // Ensure comic scan exists
-    await this.ensureComicScan(comicId, comic);
+      // Update externalUrl in case slug changed
+      await this.db.update(comicScans).set({
+        externalUrl,
+      }).where(eq(comicScans.id, existingComicScan.id));
+
+      comicId = existingComicScan.comic.id;
+      comicScanId = existingComicScan.id;
+
+      this.logger.debug(`Found existing comic by Olympus ID: ${comic.id} -> Comic #${comicId}`);
+    } else {
+      // No match by Olympus ID - check by title as fallback (to merge possible duplicates)
+      const existingByTitle = await this.db.query.comics.findFirst({
+        where: eq(comics.title, comic.title),
+      });
+
+      if (existingByTitle) {
+        await this.db.update(comics).set({
+          slug: comic.slug,
+          titleAlternative: comic.titleAlternative,
+          description: comic.description,
+          author: comic.author,
+          coverImage: comic.coverImage,
+          type: comic.type === 'comic' ? 'manga' : comic.type,
+          status: comic.status,
+          updatedAt: new Date(),
+        }).where(eq(comics.id, existingByTitle.id));
+        comicId = existingByTitle.id;
+        this.logger.debug(`Found existing comic by title: "${comic.title}" -> Comic #${comicId}`);
+      } else {
+        // Create new comic
+        const [created] = await this.db.insert(comics).values({
+          title: comic.title,
+          slug: comic.slug,
+          titleAlternative: comic.titleAlternative,
+          description: comic.description,
+          author: comic.author,
+          coverImage: comic.coverImage,
+          type: comic.type === 'comic' ? 'manga' : comic.type,
+          status: comic.status,
+        }).returning();
+        comicId = created.id;
+        this.logger.log(`Created new comic: "${comic.title}" -> Comic #${comicId}`);
+      }
+
+      // Ensure comic scan exists for this scan group (with Olympus ID)
+      comicScanId = await this.ensureComicScan(comicId, comic);
+    }
 
     // Sync genres
     await this.syncGenres(comicId, comic.genres);
 
-    return comicId;
+    return { comicId, comicScanId };
   }
 
   private async ensureComicScan(comicId: number, comic: ScrapedComic): Promise<number> {
+    // Check for existing comic scan for this specific scan group
     const existing = await this.db.query.comicScans.findFirst({
-      where: eq(comicScans.comicId, comicId),
+      where: and(
+        eq(comicScans.comicId, comicId),
+        eq(comicScans.scanGroupId, this.scanGroupId!),
+      ),
     });
 
-    if (existing) return existing.id;
+    if (existing) {
+      // Update externalId and externalUrl if needed
+      await this.db.update(comicScans).set({
+        externalId: comic.id,
+        externalUrl: `${OLYMPUS_ORIGIN}/series/${comic.slug}`,
+      }).where(eq(comicScans.id, existing.id));
+      return existing.id;
+    }
 
     const [created] = await this.db.insert(comicScans).values({
       comicId,
@@ -323,37 +418,20 @@ export class OlympusAdapter {
     }
   }
 
-  private async upsertChapter(
-    comicId: number,
+  private async insertChapter(
+    comicScanId: number,
     chapter: ScrapedChapter,
     listItem: ChapterListItem,
   ): Promise<void> {
-    // Get comic scan
-    const comicScan = await this.db.query.comicScans.findFirst({
-      where: eq(comicScans.comicId, comicId),
-    });
-
-    if (!comicScan) return;
-
-    const existing = await this.db.query.chapters.findFirst({
-      where: eq(chapters.slug, chapter.slug),
-    });
-
-    if (existing) {
-      await this.db.update(chapters).set({
-        urlPages: chapter.pages,
-        updatedAt: new Date(),
-      }).where(eq(chapters.id, existing.id));
-    } else {
-      await this.db.insert(chapters).values({
-        comicScanId: comicScan.id,
-        chapterNumber: chapter.chapterNumber,
-        title: chapter.title || listItem.title,
-        slug: chapter.slug,
-        releaseDate: listItem.releaseDate,
-        urlPages: chapter.pages,
-      }).onConflictDoNothing();
-    }
+    // Insert new chapter (we already know it doesn't exist)
+    await this.db.insert(chapters).values({
+      comicScanId,
+      chapterNumber: chapter.chapterNumber,
+      title: chapter.title || listItem.title,
+      slug: chapter.slug,
+      releaseDate: listItem.releaseDate,
+      urlPages: chapter.pages,
+    }).onConflictDoNothing();
   }
 
   private async fetchJson<T>(url: string): Promise<T> {

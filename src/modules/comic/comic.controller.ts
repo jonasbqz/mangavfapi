@@ -4,6 +4,7 @@ import {
   Param,
   Query,
   ParseIntPipe,
+  NotFoundException,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags, ApiQuery } from '@nestjs/swagger';
 import { ComicService, ComicFilters } from './comic.service';
@@ -18,10 +19,12 @@ export class ComicController {
   @ApiQuery({ name: 'search', required: false })
   @ApiQuery({ name: 'type', required: false, enum: ['manga', 'manhwa', 'manhua'] })
   @ApiQuery({ name: 'status', required: false, enum: ['ongoing', 'completed', 'hiatus', 'cancelled'] })
-  @ApiQuery({ name: 'genres', required: false, description: 'Comma-separated genre IDs' })
+  @ApiQuery({ name: 'genres', required: false, description: 'Comma-separated genre names' })
   @ApiQuery({ name: 'nsfw', required: false, type: Boolean })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'orderBy', required: false, enum: ['created_at', 'views', 'updated_at'] })
+  @ApiQuery({ name: 'isDesc', required: false, type: Boolean })
   async findAll(
     @Query('search') search?: string,
     @Query('type') type?: 'manga' | 'manhwa' | 'manhua',
@@ -30,15 +33,19 @@ export class ComicController {
     @Query('nsfw') nsfw?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('orderBy') orderBy?: string,
+    @Query('isDesc') isDesc?: string,
   ) {
     const filters: ComicFilters = {
       search,
       type,
       status,
-      genreIds: genres ? genres.split(',').map(Number) : undefined,
-      isNsfw: nsfw ? nsfw === 'true' : undefined,
+      genreNames: genres ? genres.split(',').map(g => g.trim()).filter(Boolean) : undefined,
+      isNsfw: nsfw === 'false' ? false : nsfw === 'true' ? true : undefined,
       page: page ? parseInt(page, 10) : 1,
       limit: limit ? parseInt(limit, 10) : 20,
+      orderBy: (orderBy as 'created_at' | 'views' | 'updated_at') || 'updated_at',
+      isDesc: isDesc !== 'false',
     };
 
     return this.comicService.findAll(filters);
@@ -58,10 +65,34 @@ export class ComicController {
     return this.comicService.getRecent(limit ? parseInt(limit, 10) : 10);
   }
 
+  @Get('recent-chapters')
+  @ApiOperation({ summary: 'Get comics with recent chapters for home page' })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async getRecentWithChapters(@Query('limit') limit?: string) {
+    return this.comicService.getRecentWithChapters(limit ? parseInt(limit, 10) : 20);
+  }
+
   @Get('genres')
   @ApiOperation({ summary: 'Get all genres' })
   async getGenres() {
     return this.comicService.getAllGenres();
+  }
+
+  @Get('popular')
+  @ApiOperation({ summary: 'Get popular comics' })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async getPopular(@Query('limit') limit?: string) {
+    return this.comicService.getPopular(limit ? parseInt(limit, 10) : 10);
+  }
+
+  @Get(':id/recommendations')
+  @ApiOperation({ summary: 'Get comic recommendations based on genres' })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async getRecommendations(
+    @Param('id', ParseIntPipe) id: number,
+    @Query('limit') limit?: string,
+  ) {
+    return this.comicService.getRecommendations(id, limit ? parseInt(limit, 10) : 10);
   }
 
   @Get(':id')

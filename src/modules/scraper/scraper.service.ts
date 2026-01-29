@@ -1,4 +1,4 @@
-import { Injectable, Inject, Logger, ConflictException } from '@nestjs/common';
+import { Injectable, Inject, Logger, ConflictException, OnModuleInit } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
 import { DATABASE_CONNECTION } from '@/database/database.module';
@@ -10,7 +10,7 @@ import { IkigaiAdapter } from './adapters/ikigai.adapter';
 import type { ScraperResult } from './scraper.types';
 
 @Injectable()
-export class ScraperService {
+export class ScraperService implements OnModuleInit {
   private readonly logger = new Logger(ScraperService.name);
   private readonly delayMs: number;
 
@@ -21,6 +21,15 @@ export class ScraperService {
     private queue: ScraperQueue,
   ) {
     this.delayMs = this.configService.get<number>('SCRAPER_DELAY_MS') || 2000;
+  }
+
+  async onModuleInit() {
+    this.logger.log('Server started. Triggering initial scrape tasks...');
+    
+    // We run them sequentially in the queue to avoid API rate limiting on startup
+    // Using a smaller page range for the initial startup scrape
+    this.scrapeIkigai(1, 1).catch(err => this.logger.error(`Initial Ikigai scrape failed: ${err}`));
+    this.scrapeOlympus(1, 1).catch(err => this.logger.error(`Initial Olympus scrape failed: ${err}`));
   }
 
   getStatus() {

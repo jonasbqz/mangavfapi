@@ -2,7 +2,7 @@ import { Logger } from '@nestjs/common';
 import * as cheerio from 'cheerio';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '@/database/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { comics, chapters, comicScans, scanGroups, genres, comicGenres } from '@/database/schema';
 import type { ScrapedComic, ScrapedChapter, ChapterListItem, ScraperResult } from '../scraper.types';
 
@@ -328,13 +328,22 @@ export class IkigaiAdapter {
   }
 
   private async upsertComic(comic: ScrapedComic): Promise<number> {
-    const existing = await this.db.query.comics.findFirst({
-      where: eq(comics.slug, comic.slug),
+    const externalUrl = `${IKIGAI_ORIGIN}/series/${comic.slug}`;
+
+    // First, check if we already have this comic via externalUrl in comicScans
+    // This prevents duplicates when URLs/slugs change
+    const existingComicScan = await this.db.query.comicScans.findFirst({
+      where: and(
+        eq(comicScans.externalUrl, externalUrl),
+        eq(comicScans.scanGroupId, this.scanGroupId!),
+      ),
+      with: { comic: true },
     });
 
     let comicId: number;
 
-    if (existing) {
+    if (existingComicScan && existingComicScan.comic) {
+      // Found via externalUrl - update the existing comic
       await this.db.update(comics).set({
         title: comic.title,
         description: comic.description,
@@ -342,18 +351,36 @@ export class IkigaiAdapter {
         type: comic.type === 'comic' ? 'manga' : comic.type,
         status: comic.status,
         updatedAt: new Date(),
-      }).where(eq(comics.id, existing.id));
-      comicId = existing.id;
+      }).where(eq(comics.id, existingComicScan.comicId));
+      comicId = existingComicScan.comicId;
     } else {
-      const [created] = await this.db.insert(comics).values({
-        title: comic.title,
-        slug: comic.slug,
-        description: comic.description,
-        coverImage: comic.coverImage,
-        type: comic.type === 'comic' ? 'manga' : comic.type,
-        status: comic.status,
-      }).returning();
-      comicId = created.id;
+      // Check by slug as fallback
+      const existingBySlug = await this.db.query.comics.findFirst({
+        where: eq(comics.slug, comic.slug),
+      });
+
+      if (existingBySlug) {
+        await this.db.update(comics).set({
+          title: comic.title,
+          description: comic.description,
+          coverImage: comic.coverImage,
+          type: comic.type === 'comic' ? 'manga' : comic.type,
+          status: comic.status,
+          updatedAt: new Date(),
+        }).where(eq(comics.id, existingBySlug.id));
+        comicId = existingBySlug.id;
+      } else {
+        // Create new comic
+        const [created] = await this.db.insert(comics).values({
+          title: comic.title,
+          slug: comic.slug,
+          description: comic.description,
+          coverImage: comic.coverImage,
+          type: comic.type === 'comic' ? 'manga' : comic.type,
+          status: comic.status,
+        }).returning();
+        comicId = created.id;
+      }
     }
 
     await this.ensureComicScan(comicId, comic);
@@ -415,13 +442,19 @@ export class IkigaiAdapter {
 
     if (!comicScan) return;
 
+    // Search by (comicScanId, chapterNumber) instead of just slug
+    // This prevents duplicates when chapter URLs change
     const existing = await this.db.query.chapters.findFirst({
-      where: eq(chapters.slug, chapter.slug),
+      where: and(
+        eq(chapters.comicScanId, comicScan.id),
+        eq(chapters.chapterNumber, chapter.chapterNumber),
+      ),
     });
 
     if (existing) {
       await this.db.update(chapters).set({
         urlPages: chapter.pages,
+        slug: chapter.slug, // Update slug in case it changed
         updatedAt: new Date(),
       }).where(eq(chapters.id, existing.id));
     } else {
