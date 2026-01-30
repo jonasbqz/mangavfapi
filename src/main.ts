@@ -13,41 +13,37 @@ import { SanitizeInterceptor } from './common/interceptors';
 import { auth } from './lib/auth';
 import { toNodeHandler } from 'better-auth/node';
 
-// Helper function to handle better-auth requests
+// Helper function to handle better-auth requests using raw Node.js response
 async function handleBetterAuth(
   request: FastifyRequest,
   reply: FastifyReply,
   handler: ReturnType<typeof toNodeHandler>,
-): Promise<boolean> {
-  return new Promise((resolve) => {
-    const nodeReq = {
-      method: request.method,
-      url: `${request.protocol}://${request.hostname}${request.url}`,
-      headers: request.headers,
-      body: request.body,
-    };
+): Promise<void> {
+  // Hijack the reply to take full control
+  reply.hijack();
 
-    const nodeRes = {
-      setHeader: (name: string, value: string) => reply.header(name, value),
-      getHeader: (name: string) => reply.getHeader(name),
-      writeHead: (status: number, headers?: Record<string, string>) => {
-        reply.status(status);
-        if (headers) {
-          Object.entries(headers).forEach(([key, value]) => reply.header(key, value));
-        }
-      },
-      end: (body?: string) => {
-        if (body) {
-          reply.send(body);
-        } else {
-          reply.send();
-        }
-        resolve(true);
-      },
-    };
+  const nodeReq = {
+    method: request.method,
+    url: `${request.protocol}://${request.hostname}${request.url}`,
+    headers: request.headers,
+    body: request.body,
+  };
 
-    handler(nodeReq as any, nodeRes as any).catch(() => resolve(false));
-  });
+  // Use raw Node.js response
+  const rawRes = reply.raw;
+
+  const nodeRes = {
+    setHeader: (name: string, value: string) => rawRes.setHeader(name, value),
+    getHeader: (name: string) => rawRes.getHeader(name),
+    writeHead: (status: number, headers?: Record<string, string>) => {
+      rawRes.writeHead(status, headers);
+    },
+    end: (body?: string) => {
+      rawRes.end(body);
+    },
+  };
+
+  await handler(nodeReq as any, nodeRes as any);
 }
 
 async function bootstrap() {
@@ -66,18 +62,16 @@ async function bootstrap() {
     credentials: true,
   });
 
-  // Register better-auth handler for all auth routes using preHandler hook
+  // Register better-auth handler for all auth routes using onRequest hook
   const authHandler = toNodeHandler(auth);
   const fastifyInstance = app.getHttpAdapter().getInstance();
 
-  // Use a hook to intercept all /api/auth/* requests
-  fastifyInstance.addHook('preHandler', async (request, reply) => {
+  // Use onRequest hook to intercept all /api/auth/* requests before routing
+  fastifyInstance.addHook('onRequest', async (request, reply) => {
     // Only handle /api/auth/ routes
     const url = request.url.split('?')[0]; // Remove query string
     if (url.startsWith('/api/auth/')) {
       await handleBetterAuth(request, reply, authHandler);
-      // Prevent further processing
-      return;
     }
   });
 
