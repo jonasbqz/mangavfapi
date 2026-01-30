@@ -4,6 +4,7 @@ import type * as schema from '@/database/schema';
 import { eq, and, desc } from 'drizzle-orm';
 import { comics, chapters, comicScans, scanGroups, genres, comicGenres } from '@/database/schema';
 import type { ScrapedComic, ScrapedChapter, ChapterListItem, ScraperResult } from '../scraper.types';
+import { isAdultGenreSlug } from './base.adapter';
 
 const OLYMPUS_API = 'https://dashboard.olympusbiblioteca.com/api';
 const OLYMPUS_ORIGIN = 'https://dashboard.olympusbiblioteca.com';
@@ -394,8 +395,15 @@ export class OlympusAdapter {
     // Delete existing
     await this.db.delete(comicGenres).where(eq(comicGenres.comicId, comicId));
 
+    let hasAdultGenre = false;
+
     for (const name of genreNames) {
       const slug = this.slugify(name);
+
+      // Check if this is an adult genre
+      if (isAdultGenreSlug(slug)) {
+        hasAdultGenre = true;
+      }
 
       // Get or create genre
       let genre = await this.db.query.genres.findFirst({
@@ -416,6 +424,11 @@ export class OlympusAdapter {
         genreId: genre.id,
       }).onConflictDoNothing();
     }
+
+    // Update comic's isNsfw based on genres
+    await this.db.update(comics).set({
+      isNsfw: hasAdultGenre,
+    }).where(eq(comics.id, comicId));
   }
 
   private async insertChapter(

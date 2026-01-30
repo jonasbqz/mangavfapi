@@ -398,8 +398,21 @@ export class ComicService {
     return results;
   }
 
-  // Adult genres that should be hidden when not in adult mode
-  private readonly ADULT_GENRES = ['+18', 'ECCHI', 'ADULTO', 'MADURO', 'HENTAI', 'YAOI', 'YURI'];
+  // Adult genre slugs that should be hidden when not in adult mode
+  private readonly ADULT_GENRE_SLUGS = [
+    '18',           // +18
+    'adulto',       // Adulto
+    'maduro',       // Maduro
+    'smut',         // Smut
+    'boys-love',    // Boys Love
+    'ecchi',        // Ecchi
+    'hentai',       // Hentai
+    'yaoi',         // Yaoi
+    'yuri',         // Yuri
+    'erotico',      // Erótico
+    'gore',         // Gore (mature content)
+    'girls-love',   // Girls Love
+  ];
 
   async getAllGenres(includeAdult = false) {
     const cacheKey = `${CACHE_KEYS.GENRES}:${includeAdult ? 'all' : 'safe'}`;
@@ -415,9 +428,9 @@ export class ComicService {
           return allGenres;
         }
 
-        // Filter out adult genres
+        // Filter out adult genres by slug
         return allGenres.filter(g =>
-          !this.ADULT_GENRES.includes(g.name.toUpperCase())
+          !this.ADULT_GENRE_SLUGS.includes(g.slug.toLowerCase())
         );
       },
       CACHE_TTL.STATIC, // 24 hours - rarely changes
@@ -580,5 +593,57 @@ export class ComicService {
       },
       CACHE_TTL.LONG, // 2 hours
     );
+  }
+
+  /**
+   * Update isNsfw flag for all existing comics based on their genres
+   * Returns the number of comics updated
+   */
+  async syncNsfwFlags(): Promise<{ updated: number; details: Array<{ id: number; title: string; isNsfw: boolean }> }> {
+    // Get all adult genre IDs
+    const adultGenres = await this.db.query.genres.findMany({
+      where: inArray(genres.slug, this.ADULT_GENRE_SLUGS),
+    });
+    const adultGenreIds = adultGenres.map(g => g.id);
+
+    // Get all comics with their genres
+    const allComics = await this.db.query.comics.findMany({
+      with: {
+        comicGenres: true,
+      },
+    });
+
+    const updated: Array<{ id: number; title: string; isNsfw: boolean }> = [];
+
+    for (const comic of allComics) {
+      // Check if comic has any adult genre
+      const hasAdultGenre = comic.comicGenres.some(cg => adultGenreIds.includes(cg.genreId));
+
+      // Only update if the isNsfw flag is different
+      if (comic.isNsfw !== hasAdultGenre) {
+        await this.db.update(comics).set({
+          isNsfw: hasAdultGenre,
+        }).where(eq(comics.id, comic.id));
+
+        updated.push({
+          id: comic.id,
+          title: comic.title,
+          isNsfw: hasAdultGenre,
+        });
+      }
+    }
+
+    // Clear all comic-related caches
+    await this.cacheService.invalidateComicCache();
+
+    return { updated: updated.length, details: updated };
+  }
+
+  /**
+   * Clear all comic-related caches manually
+   */
+  async clearComicCache(): Promise<{ message: string }> {
+    await this.cacheService.invalidateComicCache();
+    return { message: 'Comic cache cleared successfully' };
   }
 }

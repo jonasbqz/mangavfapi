@@ -1,12 +1,13 @@
 import {
   Controller,
   Get,
+  Post,
   Param,
   Query,
   ParseIntPipe,
   NotFoundException,
 } from '@nestjs/common';
-import { ApiOperation, ApiTags, ApiQuery } from '@nestjs/swagger';
+import { ApiOperation, ApiTags, ApiQuery, ApiResponse } from '@nestjs/swagger';
 import { ComicService, ComicFilters } from './comic.service';
 
 @ApiTags('Comics')
@@ -133,5 +134,19 @@ export class ComicController {
     const comic = await this.comicService.findBySlug(slug);
     await this.comicService.incrementViews(comic.id);
     return comic;
+  }
+
+  @Post('admin/sync-nsfw')
+  @ApiOperation({ summary: 'Sync NSFW flags for all comics based on their genres' })
+  @ApiResponse({ status: 200, description: 'Returns number of updated comics and their details' })
+  async syncNsfwFlags() {
+    return this.comicService.syncNsfwFlags();
+  }
+
+  @Post('admin/clear-cache')
+  @ApiOperation({ summary: 'Clear all comic-related caches' })
+  @ApiResponse({ status: 200, description: 'Cache cleared successfully' })
+  async clearCache() {
+    return this.comicService.clearComicCache();
   }
 }

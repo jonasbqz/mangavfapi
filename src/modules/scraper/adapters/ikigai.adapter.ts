@@ -5,6 +5,7 @@ import type * as schema from '@/database/schema';
 import { eq, and } from 'drizzle-orm';
 import { comics, chapters, comicScans, scanGroups, genres, comicGenres } from '@/database/schema';
 import type { ScrapedComic, ScrapedChapter, ChapterListItem, ScraperResult } from '../scraper.types';
+import { isAdultGenreSlug } from './base.adapter';
 
 const IKIGAI_ORIGIN = 'https://ikigaimangas.com';
 const IKIGAI_MEDIA = 'https://media.ikigaimangas.cloud';
@@ -409,8 +410,15 @@ export class IkigaiAdapter {
   private async syncGenres(comicId: number, genreNames: string[]): Promise<void> {
     await this.db.delete(comicGenres).where(eq(comicGenres.comicId, comicId));
 
+    let hasAdultGenre = false;
+
     for (const name of genreNames) {
       const slug = this.slugify(name);
+
+      // Check if this is an adult genre
+      if (isAdultGenreSlug(slug)) {
+        hasAdultGenre = true;
+      }
 
       let genre = await this.db.query.genres.findFirst({
         where: eq(genres.slug, slug),
@@ -429,6 +437,11 @@ export class IkigaiAdapter {
         genreId: genre.id,
       }).onConflictDoNothing();
     }
+
+    // Update comic's isNsfw based on genres
+    await this.db.update(comics).set({
+      isNsfw: hasAdultGenre,
+    }).where(eq(comics.id, comicId));
   }
 
   private async upsertChapter(
