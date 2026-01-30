@@ -40,7 +40,22 @@ export const auth = betterAuth({
       maxAge: 60 * 5, // 5 minutes
     },
   },
-  trustedOrigins: process.env.CORS_ORIGIN?.split(',') || ['http://localhost:3000'],
+  trustedOrigins: [
+    ...(process.env.CORS_ORIGIN?.split(',') || ['http://localhost:3000']),
+    'https://mangolibreria.com',
+    'https://api.mangolibreria.com',
+  ],
+  advanced: {
+    crossSubDomainCookies: {
+      enabled: true,
+      domain: process.env.NODE_ENV === 'production' ? '.mangolibreria.com' : undefined,
+    },
+    defaultCookieAttributes: {
+      secure: process.env.NODE_ENV === 'production',
+      httpOnly: true,
+      sameSite: 'lax',
+    },
+  },
 });
 
 export type Session = typeof auth.$Infer.Session;
