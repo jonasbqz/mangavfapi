@@ -32,6 +32,7 @@ export class CommentsService {
         profile: {
           columns: {
             id: true,
+            userId: true,
             username: true,
             visibleName: true,
             avatarUrl: true,
@@ -56,6 +57,7 @@ export class CommentsService {
         profile: {
           columns: {
             id: true,
+            userId: true,
             username: true,
             visibleName: true,
             avatarUrl: true,
@@ -68,6 +70,7 @@ export class CommentsService {
             profile: {
               columns: {
                 id: true,
+                userId: true,
                 username: true,
                 visibleName: true,
                 avatarUrl: true,
@@ -94,6 +97,7 @@ export class CommentsService {
         profile: {
           columns: {
             id: true,
+            userId: true,
             username: true,
             visibleName: true,
             avatarUrl: true,
@@ -106,6 +110,7 @@ export class CommentsService {
             profile: {
               columns: {
                 id: true,
+                userId: true,
                 username: true,
                 visibleName: true,
                 avatarUrl: true,
@@ -129,6 +134,7 @@ export class CommentsService {
         profile: {
           columns: {
             id: true,
+            userId: true,
             username: true,
             visibleName: true,
             avatarUrl: true,
