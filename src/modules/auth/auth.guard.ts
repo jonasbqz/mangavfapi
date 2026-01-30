@@ -34,9 +34,36 @@ export class AuthGuard implements CanActivate {
       }
 
       // Find profile by userId
-      const profile = await this.db.query.profiles.findFirst({
+      let profile = await this.db.query.profiles.findFirst({
         where: eq(profiles.userId, session.user.id),
       });
+
+      // Auto-create profile if it doesn't exist
+      if (!profile) {
+        try {
+          // Generate a unique username from email or name
+          const baseUsername = (session.user.name || session.user.email?.split('@')[0] || 'user')
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, '')
+            .substring(0, 20);
+          const uniqueSuffix = Date.now().toString(36).substring(-4);
+          const username = `${baseUsername}${uniqueSuffix}`;
+
+          const [newProfile] = await this.db.insert(profiles).values({
+            userId: session.user.id,
+            username,
+            visibleName: session.user.name || null,
+            avatarUrl: session.user.image || null,
+            language: 'es',
+          }).returning();
+
+          profile = newProfile;
+          console.log(`Auto-created profile for user ${session.user.id}: ${username}`);
+        } catch (err) {
+          console.error('Error auto-creating profile:', err);
+          // Continue without profile - ProfileGuard will handle the 403
+        }
+      }
 
       // Attach user info to request
       (request as any).user = {

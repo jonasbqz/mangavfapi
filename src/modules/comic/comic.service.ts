@@ -1,10 +1,21 @@
 import { Injectable, Inject, NotFoundException } from '@nestjs/common';
-import { eq, like, desc, asc, and, sql, inArray } from 'drizzle-orm';
+import { eq, like, ilike, desc, asc, and, or, sql, inArray } from 'drizzle-orm';
 import { DATABASE_CONNECTION } from '@/database/database.module';
 import { comics, comicGenres, genres, comicScans, chapters } from '@/database/schema';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '@/database/schema';
 import { CacheService, CACHE_TTL, CACHE_KEYS } from '@/cache/cache.service';
+
+/**
+ * Normalize a string by removing accents/diacritics
+ * This is used for accent-insensitive search
+ */
+function normalizeString(str: string): string {
+  return str
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
 
 export interface ComicFilters {
   search?: string;
@@ -44,7 +55,26 @@ export class ComicService {
     const conditions = [];
 
     if (search) {
-      conditions.push(like(comics.title, `%${search}%`));
+      // Normalize search term (remove accents for comparison)
+      const normalizedSearch = normalizeString(search);
+      const searchPattern = `%${search}%`;
+      const normalizedPattern = `%${normalizedSearch}%`;
+
+      // Search in title and titleAlternative with:
+      // 1. Case-insensitive search with ILIKE
+      // 2. Accent-insensitive search using translate function
+      conditions.push(
+        or(
+          // Case-insensitive search on title
+          ilike(comics.title, searchPattern),
+          // Case-insensitive search on alternative title
+          ilike(comics.titleAlternative, searchPattern),
+          // Accent-insensitive search on title (using PostgreSQL translate)
+          sql`LOWER(TRANSLATE(${comics.title}, 'áéíóúàèìòùâêîôûäëïöüñÁÉÍÓÚÀÈÌÒÙÂÊÎÔÛÄËÏÖÜÑ', 'aeiouaeiouaeiouaeiounaeiouaeiouaeiouaeiouna')) LIKE ${normalizedPattern}`,
+          // Accent-insensitive search on alternative title
+          sql`LOWER(TRANSLATE(COALESCE(${comics.titleAlternative}, ''), 'áéíóúàèìòùâêîôûäëïöüñÁÉÍÓÚÀÈÌÒÙÂÊÎÔÛÄËÏÖÜÑ', 'aeiouaeiouaeiouaeiounaeiouaeiouaeiouaeiouna')) LIKE ${normalizedPattern}`,
+        )!
+      );
     }
     if (type) {
       conditions.push(eq(comics.type, type));
