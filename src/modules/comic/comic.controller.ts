@@ -54,45 +54,70 @@ export class ComicController {
   @Get('trending')
   @ApiOperation({ summary: 'Get trending comics' })
   @ApiQuery({ name: 'limit', required: false, type: Number })
-  async getTrending(@Query('limit') limit?: string) {
-    return this.comicService.getTrending(limit ? parseInt(limit, 10) : 10);
+  @ApiQuery({ name: 'nsfw', required: false, type: Boolean, description: 'Filter NSFW content' })
+  async getTrending(
+    @Query('limit') limit?: string,
+    @Query('nsfw') nsfw?: string,
+  ) {
+    const isNsfw = nsfw === 'false' ? false : nsfw === 'true' ? true : undefined;
+    return this.comicService.getTrending(limit ? parseInt(limit, 10) : 10, isNsfw);
   }
 
   @Get('recent')
   @ApiOperation({ summary: 'Get recently updated comics' })
   @ApiQuery({ name: 'limit', required: false, type: Number })
-  async getRecent(@Query('limit') limit?: string) {
-    return this.comicService.getRecent(limit ? parseInt(limit, 10) : 10);
+  @ApiQuery({ name: 'nsfw', required: false, type: Boolean, description: 'Filter NSFW content' })
+  async getRecent(
+    @Query('limit') limit?: string,
+    @Query('nsfw') nsfw?: string,
+  ) {
+    const isNsfw = nsfw === 'false' ? false : nsfw === 'true' ? true : undefined;
+    return this.comicService.getRecent(limit ? parseInt(limit, 10) : 10, isNsfw);
   }
 
   @Get('recent-chapters')
   @ApiOperation({ summary: 'Get comics with recent chapters for home page' })
   @ApiQuery({ name: 'limit', required: false, type: Number })
-  async getRecentWithChapters(@Query('limit') limit?: string) {
-    return this.comicService.getRecentWithChapters(limit ? parseInt(limit, 10) : 20);
+  @ApiQuery({ name: 'nsfw', required: false, type: Boolean, description: 'Filter NSFW content' })
+  async getRecentWithChapters(
+    @Query('limit') limit?: string,
+    @Query('nsfw') nsfw?: string,
+  ) {
+    const isNsfw = nsfw === 'false' ? false : nsfw === 'true' ? true : undefined;
+    return this.comicService.getRecentWithChapters(limit ? parseInt(limit, 10) : 20, isNsfw);
   }
 
   @Get('genres')
   @ApiOperation({ summary: 'Get all genres' })
-  async getGenres() {
-    return this.comicService.getAllGenres();
+  @ApiQuery({ name: 'nsfw', required: false, type: Boolean, description: 'Include adult genres' })
+  async getGenres(@Query('nsfw') nsfw?: string) {
+    const includeAdult = nsfw === 'true';
+    return this.comicService.getAllGenres(includeAdult);
   }
 
   @Get('popular')
   @ApiOperation({ summary: 'Get popular comics' })
   @ApiQuery({ name: 'limit', required: false, type: Number })
-  async getPopular(@Query('limit') limit?: string) {
-    return this.comicService.getPopular(limit ? parseInt(limit, 10) : 10);
+  @ApiQuery({ name: 'nsfw', required: false, type: Boolean, description: 'Filter NSFW content' })
+  async getPopular(
+    @Query('limit') limit?: string,
+    @Query('nsfw') nsfw?: string,
+  ) {
+    const isNsfw = nsfw === 'false' ? false : nsfw === 'true' ? true : undefined;
+    return this.comicService.getPopular(limit ? parseInt(limit, 10) : 10, isNsfw);
   }
 
   @Get(':id/recommendations')
   @ApiOperation({ summary: 'Get comic recommendations based on genres' })
   @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'nsfw', required: false, type: Boolean, description: 'Filter NSFW content' })
   async getRecommendations(
     @Param('id', ParseIntPipe) id: number,
     @Query('limit') limit?: string,
+    @Query('nsfw') nsfw?: string,
   ) {
-    return this.comicService.getRecommendations(id, limit ? parseInt(limit, 10) : 10);
+    const isNsfw = nsfw === 'false' ? false : nsfw === 'true' ? true : undefined;
+    return this.comicService.getRecommendations(id, limit ? parseInt(limit, 10) : 10, isNsfw);
   }
 
   @Get(':id')

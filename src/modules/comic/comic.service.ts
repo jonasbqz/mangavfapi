@@ -249,13 +249,16 @@ export class ComicService {
     );
   }
 
-  async getTrending(limit = 10) {
-    const cacheKey = `${CACHE_KEYS.COMIC_TRENDING}:${limit}`;
+  async getTrending(limit = 10, isNsfw?: boolean) {
+    const nsfwKey = isNsfw === undefined ? 'all' : isNsfw ? 'nsfw' : 'safe';
+    const cacheKey = `${CACHE_KEYS.COMIC_TRENDING}:${limit}:${nsfwKey}`;
 
     return this.cacheService.wrap(
       cacheKey,
-      () =>
-        this.db.query.comics.findMany({
+      () => {
+        const whereClause = isNsfw !== undefined ? eq(comics.isNsfw, isNsfw) : undefined;
+        return this.db.query.comics.findMany({
+          where: whereClause,
           orderBy: [desc(comics.views)],
           limit,
           with: {
@@ -263,18 +266,22 @@ export class ComicService {
               with: { genre: true },
             },
           },
-        }),
+        });
+      },
       CACHE_TTL.LONG, // 2 hours
     );
   }
 
-  async getRecent(limit = 10) {
-    const cacheKey = `${CACHE_KEYS.COMIC_RECENT}:${limit}`;
+  async getRecent(limit = 10, isNsfw?: boolean) {
+    const nsfwKey = isNsfw === undefined ? 'all' : isNsfw ? 'nsfw' : 'safe';
+    const cacheKey = `${CACHE_KEYS.COMIC_RECENT}:${limit}:${nsfwKey}`;
 
     return this.cacheService.wrap(
       cacheKey,
-      () =>
-        this.db.query.comics.findMany({
+      () => {
+        const whereClause = isNsfw !== undefined ? eq(comics.isNsfw, isNsfw) : undefined;
+        return this.db.query.comics.findMany({
+          where: whereClause,
           orderBy: [desc(comics.updatedAt)],
           limit,
           with: {
@@ -282,22 +289,24 @@ export class ComicService {
               with: { genre: true },
             },
           },
-        }),
+        });
+      },
       CACHE_TTL.MEDIUM, // 30 minutes
     );
   }
 
-  async getRecentWithChapters(limit = 20) {
-    const cacheKey = `${CACHE_KEYS.COMIC_RECENT_CHAPTERS}:${limit}`;
+  async getRecentWithChapters(limit = 20, isNsfw?: boolean) {
+    const nsfwKey = isNsfw === undefined ? 'all' : isNsfw ? 'nsfw' : 'safe';
+    const cacheKey = `${CACHE_KEYS.COMIC_RECENT_CHAPTERS}:${limit}:${nsfwKey}`;
 
     return this.cacheService.wrap(
       cacheKey,
-      () => this.getRecentWithChaptersFromDb(limit),
+      () => this.getRecentWithChaptersFromDb(limit, isNsfw),
       CACHE_TTL.SHORT, // 10 minutes - frequently updated
     );
   }
 
-  private async getRecentWithChaptersFromDb(limit = 20) {
+  private async getRecentWithChaptersFromDb(limit = 20, isNsfw?: boolean) {
     // Step 1: Get comic_scans that have chapters, ordered by most recent chapter
     // Using raw SQL to get distinct comic_scan_ids with their max chapter date
     const recentScansQuery = await this.db.execute(sql`
@@ -308,10 +317,9 @@ export class ComicService {
       ORDER BY comic_scan_id, created_at DESC
     `);
 
-    // Sort by last_chapter_at descending and take limit
+    // Sort by last_chapter_at descending
     const sortedScans = (recentScansQuery.rows as any[])
-      .sort((a, b) => new Date(b.last_chapter_at).getTime() - new Date(a.last_chapter_at).getTime())
-      .slice(0, limit);
+      .sort((a, b) => new Date(b.last_chapter_at).getTime() - new Date(a.last_chapter_at).getTime());
 
     if (sortedScans.length === 0) {
       return [];
@@ -350,11 +358,16 @@ export class ComicService {
       }
     }
 
-    // Step 4: Build results in the correct order
-    return sortedScans
+    // Step 4: Build results in the correct order, filtering by NSFW if specified
+    const results = sortedScans
       .map(({ comic_scan_id, last_chapter_at }) => {
         const scan = scanDataMap.get(comic_scan_id);
         if (!scan?.comic) return null;
+
+        // Filter by NSFW if specified
+        if (isNsfw !== undefined && scan.comic.isNsfw !== isNsfw) {
+          return null;
+        }
 
         const chaps = chaptersByScan.get(comic_scan_id) || [];
 
@@ -379,18 +392,34 @@ export class ComicService {
           })),
         };
       })
-      .filter(Boolean);
+      .filter(Boolean)
+      .slice(0, limit); // Apply limit after filtering
+
+    return results;
   }
 
-  async getAllGenres() {
-    const cacheKey = CACHE_KEYS.GENRES;
+  // Adult genres that should be hidden when not in adult mode
+  private readonly ADULT_GENRES = ['+18', 'ECCHI', 'ADULTO', 'MADURO', 'HENTAI', 'YAOI', 'YURI'];
+
+  async getAllGenres(includeAdult = false) {
+    const cacheKey = `${CACHE_KEYS.GENRES}:${includeAdult ? 'all' : 'safe'}`;
 
     return this.cacheService.wrap(
       cacheKey,
-      () =>
-        this.db.query.genres.findMany({
+      async () => {
+        const allGenres = await this.db.query.genres.findMany({
           orderBy: [genres.name],
-        }),
+        });
+
+        if (includeAdult) {
+          return allGenres;
+        }
+
+        // Filter out adult genres
+        return allGenres.filter(g =>
+          !this.ADULT_GENRES.includes(g.name.toUpperCase())
+        );
+      },
       CACHE_TTL.STATIC, // 24 hours - rarely changes
     );
   }
@@ -425,17 +454,18 @@ export class ComicService {
     return comicScan;
   }
 
-  async getRecommendations(comicId: number, limit = 10) {
-    const cacheKey = `${CACHE_KEYS.COMIC_RECOMMENDATIONS}:${comicId}:${limit}`;
+  async getRecommendations(comicId: number, limit = 10, isNsfw?: boolean) {
+    const nsfwKey = isNsfw === undefined ? 'all' : isNsfw ? 'nsfw' : 'safe';
+    const cacheKey = `${CACHE_KEYS.COMIC_RECOMMENDATIONS}:${comicId}:${limit}:${nsfwKey}`;
 
     return this.cacheService.wrap(
       cacheKey,
-      () => this.getRecommendationsFromDb(comicId, limit),
+      () => this.getRecommendationsFromDb(comicId, limit, isNsfw),
       CACHE_TTL.LONG, // 2 hours
     );
   }
 
-  private async getRecommendationsFromDb(comicId: number, limit = 10) {
+  private async getRecommendationsFromDb(comicId: number, limit = 10, isNsfw?: boolean) {
     // Get the comic's genres
     const comicGenreRecords = await this.db.query.comicGenres.findMany({
       where: eq(comicGenres.comicId, comicId),
@@ -456,9 +486,15 @@ export class ComicService {
         .filter(id => id !== comicId);
 
       if (comicIds.length > 0) {
+        // Build where clause with NSFW filter
+        const conditions = [inArray(comics.id, comicIds)];
+        if (isNsfw !== undefined) {
+          conditions.push(eq(comics.isNsfw, isNsfw));
+        }
+
         // Get comics ordered by views (popularity within same genres)
         recommendedComics = await this.db.query.comics.findMany({
-          where: inArray(comics.id, comicIds),
+          where: and(...conditions),
           orderBy: [desc(comics.views)],
           limit,
           with: {
@@ -475,10 +511,17 @@ export class ComicService {
       const existingIds = recommendedComics.map(c => c.id);
       existingIds.push(comicId); // Exclude current comic
 
+      // Build conditions for fallback
+      const conditions = [];
+      if (existingIds.length > 0) {
+        conditions.push(sql`${comics.id} NOT IN (${sql.join(existingIds.map(id => sql`${id}`), sql`, `)})`);
+      }
+      if (isNsfw !== undefined) {
+        conditions.push(eq(comics.isNsfw, isNsfw));
+      }
+
       const popularComics = await this.db.query.comics.findMany({
-        where: existingIds.length > 0
-          ? sql`${comics.id} NOT IN (${sql.join(existingIds.map(id => sql`${id}`), sql`, `)})`
-          : undefined,
+        where: conditions.length > 0 ? and(...conditions) : undefined,
         orderBy: [desc(comics.views)],
         limit: limit - recommendedComics.length,
         with: {
@@ -504,13 +547,16 @@ export class ComicService {
     }));
   }
 
-  async getPopular(limit = 10) {
-    const cacheKey = `${CACHE_KEYS.COMIC_POPULAR}:${limit}`;
+  async getPopular(limit = 10, isNsfw?: boolean) {
+    const nsfwKey = isNsfw === undefined ? 'all' : isNsfw ? 'nsfw' : 'safe';
+    const cacheKey = `${CACHE_KEYS.COMIC_POPULAR}:${limit}:${nsfwKey}`;
 
     return this.cacheService.wrap(
       cacheKey,
       async () => {
+        const whereClause = isNsfw !== undefined ? eq(comics.isNsfw, isNsfw) : undefined;
         const popularComics = await this.db.query.comics.findMany({
+          where: whereClause,
           orderBy: [desc(comics.views)],
           limit,
           with: {
