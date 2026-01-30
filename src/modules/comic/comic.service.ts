@@ -399,13 +399,12 @@ export class ComicService {
   }
 
   // Adult genre slugs that should be hidden when not in adult mode
+  // Note: ecchi and smut are NOT considered adult content
   private readonly ADULT_GENRE_SLUGS = [
     '18',           // +18
     'adulto',       // Adulto
     'maduro',       // Maduro
-    'smut',         // Smut
     'boys-love',    // Boys Love
-    'ecchi',        // Ecchi
     'hentai',       // Hentai
     'yaoi',         // Yaoi
     'yuri',         // Yuri

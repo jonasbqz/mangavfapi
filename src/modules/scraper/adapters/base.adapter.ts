@@ -2,13 +2,12 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '@/database/schema';
 
 // Adult genre slugs - used to automatically mark comics as NSFW
+// Note: ecchi and smut are NOT considered adult content
 export const ADULT_GENRE_SLUGS = [
   '18',           // +18
   'adulto',       // Adulto
   'maduro',       // Maduro
-  'smut',         // Smut
   'boys-love',    // Boys Love
-  'ecchi',        // Ecchi
   'hentai',       // Hentai
   'yaoi',         // Yaoi
   'yuri',         // Yuri
