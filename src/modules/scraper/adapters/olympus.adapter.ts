@@ -26,14 +26,22 @@ export class OlympusAdapter {
   async scrape(startPage = 1, endPage = 5): Promise<ScraperResult> {
     const result: ScraperResult = { comics: 0, chapters: 0, errors: [] };
 
+    this.logger.log(`Starting Olympus scrape: pages ${startPage}-${endPage}`);
+
     try {
       // Ensure scan group exists
       await this.ensureScanGroup();
+      this.logger.log(`Scan group ensured: ID ${this.scanGroupId}`);
 
       const startTime = Date.now();
       const comicInfos = await this.getRecentComicUrls(startPage, endPage);
       const duration = ((Date.now() - startTime) / 1000).toFixed(2);
       this.logger.log(`Found ${comicInfos.length} comics to scrape (took ${duration}s)`);
+
+      if (comicInfos.length === 0) {
+        this.logger.warn(`No comics found! Check if the API is working: ${OLYMPUS_API}/new-chapters`);
+        result.errors.push(`No comics found from Olympus API`);
+      }
 
       for (const { url, olympusId } of comicInfos) {
         try {
@@ -51,6 +59,7 @@ export class OlympusAdapter {
       result.errors.push(msg);
     }
 
+    this.logger.log(`Olympus scrape completed: ${result.comics} comics, ${result.chapters} chapters, ${result.errors.length} errors`);
     return result;
   }
 
@@ -79,12 +88,19 @@ export class OlympusAdapter {
 
     for (let page = startPage; page <= endPage; page++) {
       try {
-        const response = await this.fetchJson<OlympusApiResponse>(
-          `${OLYMPUS_API}/new-chapters?page=${page}`
-        );
+        const apiUrl = `${OLYMPUS_API}/new-chapters?page=${page}`;
+        this.logger.debug(`Fetching Olympus page ${page}: ${apiUrl}`);
 
-        if (!response.data || !Array.isArray(response.data)) break;
+        const response = await this.fetchJson<OlympusApiResponse>(apiUrl);
 
+        if (!response.data || !Array.isArray(response.data)) {
+          this.logger.warn(`Page ${page}: No data or invalid response`);
+          break;
+        }
+
+        this.logger.debug(`Page ${page}: got ${response.data.length} items`);
+
+        let foundOnPage = 0;
         for (const item of response.data) {
           // Skip novels
           if (item.type?.toLowerCase() === 'novel') continue;
@@ -99,8 +115,11 @@ export class OlympusAdapter {
               url: `${OLYMPUS_API}/series/${slug}`,
               olympusId,
             });
+            foundOnPage++;
           }
         }
+
+        this.logger.debug(`Page ${page}: found ${foundOnPage} new comics`);
         await this.delay(500); // Shorter delay for update page discovery
       } catch (error) {
         this.logger.error(`Failed to fetch page ${page}: ${error}`);

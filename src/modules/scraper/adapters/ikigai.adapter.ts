@@ -26,11 +26,19 @@ export class IkigaiAdapter {
   async scrape(startPage = 1, endPage = 10): Promise<ScraperResult> {
     const result: ScraperResult = { comics: 0, chapters: 0, errors: [] };
 
+    this.logger.log(`Starting Ikigai scrape: pages ${startPage}-${endPage}, baseUrl: ${this.baseUrl}`);
+
     try {
       await this.ensureScanGroup();
+      this.logger.log(`Scan group ensured: ID ${this.scanGroupId}`);
 
       const comicUrls = await this.getRecentComicUrls(startPage, endPage);
       this.logger.log(`Found ${comicUrls.length} comics to scrape`);
+
+      if (comicUrls.length === 0) {
+        this.logger.warn(`No comics found! Check if the URL is working: ${this.baseUrl}/series/`);
+        result.errors.push(`No comics found from ${this.baseUrl}/series/`);
+      }
 
       for (const url of comicUrls) {
         try {
@@ -48,6 +56,7 @@ export class IkigaiAdapter {
       result.errors.push(msg);
     }
 
+    this.logger.log(`Ikigai scrape completed: ${result.comics} comics, ${result.chapters} chapters, ${result.errors.length} errors`);
     return result;
   }
 
@@ -77,9 +86,14 @@ export class IkigaiAdapter {
     for (let page = startPage; page <= endPage; page++) {
       try {
         const listUrl = `${this.baseUrl}/series/?tipos[]=comic&direccion=desc&ordenar=last_chapter_date&pagina=${page}`;
+        this.logger.debug(`Fetching page ${page}: ${listUrl}`);
+
         const html = await this.fetchHtml(listUrl);
+        this.logger.debug(`Got HTML response: ${html.length} characters`);
+
         const $ = cheerio.load(html);
 
+        let foundOnPage = 0;
         $('section > ul > li').each((_, el) => {
           const chaptersTotal = $(el).find('a ul li:nth-child(1) span:nth-child(2)').text().trim();
           if (chaptersTotal === '0') return;
@@ -88,8 +102,16 @@ export class IkigaiAdapter {
           if (href && !seen.has(href)) {
             seen.add(href);
             urls.push(this.joinUrl(this.baseUrl, href));
+            foundOnPage++;
           }
         });
+
+        this.logger.debug(`Page ${page}: found ${foundOnPage} comics`);
+
+        if (foundOnPage === 0 && page === startPage) {
+          // Log the HTML structure to help debug selector issues
+          this.logger.warn(`No comics found on first page. HTML preview: ${html.substring(0, 500)}...`);
+        }
 
         await this.delay();
       } catch (error) {

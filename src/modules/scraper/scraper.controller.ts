@@ -1,5 +1,5 @@
-import { Controller, Get, Post, Param, Query, Delete } from '@nestjs/common';
-import { ApiOperation, ApiTags, ApiQuery } from '@nestjs/swagger';
+import { Controller, Get, Post, Query, Delete } from '@nestjs/common';
+import { ApiOperation, ApiTags, ApiQuery, ApiResponse } from '@nestjs/swagger';
 import { ScraperService } from './scraper.service';
 import { ScraperQueue } from './scraper.queue';
 
@@ -17,23 +17,37 @@ export class ScraperController {
     return this.scraperService.getStatus();
   }
 
-  @Get('trigger')
+  @Post('trigger')
   @ApiOperation({ summary: 'Manually trigger a scraper' })
-  @ApiQuery({ name: 'name', required: true, type: String })
-  @ApiQuery({ name: 'startPage', required: false, type: Number })
-  @ApiQuery({ name: 'endPage', required: false, type: Number })
+  @ApiQuery({ name: 'name', required: true, type: String, enum: ['olympus', 'ikigai'] })
+  @ApiQuery({ name: 'startPage', required: false, type: Number, description: 'Start page (default: 1)' })
+  @ApiQuery({ name: 'endPage', required: false, type: Number, description: 'End page (default: 5 for olympus, 10 for ikigai)' })
+  @ApiResponse({ status: 200, description: 'Scraper completed' })
+  @ApiResponse({ status: 409, description: 'Another scraper is already running' })
   async trigger(
     @Query('name') name: string,
     @Query('startPage') startPage?: string,
     @Query('endPage') endPage?: string,
   ) {
+    const start = startPage ? parseInt(startPage, 10) : 1;
+    const end = endPage ? parseInt(endPage, 10) : (name === 'olympus' ? 5 : 10);
+
+    console.log(`[ScraperController] Triggering ${name} scraper: pages ${start}-${end}`);
+
     const result = await this.scraperService.triggerScraper(name, {
-      startPage: startPage ? parseInt(startPage, 10) : undefined,
-      endPage: endPage ? parseInt(endPage, 10) : undefined,
+      startPage: start,
+      endPage: end,
     });
 
+    const success = result.errors.length === 0 && (result.comics > 0 || result.chapters > 0);
+
     return {
-      message: `Scraper ${name} completed`,
+      success,
+      message: success
+        ? `Scraper ${name} completed: ${result.comics} comics, ${result.chapters} chapters`
+        : `Scraper ${name} finished with issues`,
+      scraper: name,
+      pages: { start, end },
       result,
       status: this.scraperService.getStatus(),
     };
