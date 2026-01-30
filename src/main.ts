@@ -7,6 +7,8 @@ import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import fastifyCookie from '@fastify/cookie';
 import { AppModule } from './app.module';
+import { SanitizePipe } from './common/pipes';
+import { SanitizeInterceptor } from './common/interceptors';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(
@@ -24,7 +26,12 @@ async function bootstrap() {
     credentials: true,
   });
 
+  // Global interceptor: Sanitize query and path params
+  app.useGlobalInterceptors(new SanitizeInterceptor());
+
+  // Global pipes: Sanitize body first, then validate
   app.useGlobalPipes(
+    new SanitizePipe('strict'), // Sanitize all string inputs to prevent XSS
     new ValidationPipe({
       whitelist: true,
       transform: true,

@@ -40,7 +40,16 @@ export class PlaylistsService {
         items: {
           orderBy: [asc(playlistItems.order)],
           with: {
-            comic: true,
+            comic: {
+              columns: {
+                id: true,
+                title: true,
+                coverImage: true,
+                slug: true,
+                type: true,
+                status: true,
+              },
+            },
           },
         },
       },
@@ -76,6 +85,9 @@ export class PlaylistsService {
                 id: true,
                 title: true,
                 coverImage: true,
+                slug: true,
+                type: true,
+                status: true,
               },
             },
           },
@@ -108,6 +120,9 @@ export class PlaylistsService {
                 id: true,
                 title: true,
                 coverImage: true,
+                slug: true,
+                type: true,
+                status: true,
               },
             },
           },
