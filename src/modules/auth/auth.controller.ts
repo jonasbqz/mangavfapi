@@ -21,7 +21,7 @@ export class AuthController {
     await this.handler(nodeReq as any, nodeRes as any);
   }
 
-  @Get('api/auth/session')
+  @Get('auth/session')
   @UseGuards(AuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get current session' })
@@ -36,7 +36,7 @@ export class AuthController {
     };
   }
 
-  @Get('api/me')
+  @Get('me')
   @UseGuards(AuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get current user info' })
