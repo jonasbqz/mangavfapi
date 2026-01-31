@@ -275,4 +275,18 @@ export class PlaylistsService {
       .where(eq(playlists.profileId, profileId));
     return result[0]?.count ?? 0;
   }
+
+  /**
+   * Get public playlists for sitemap (optimized - only id and updatedAt)
+   */
+  async getSitemapPlaylists(): Promise<Array<{ id: string; updatedAt: Date | null }>> {
+    return this.db
+      .select({
+        id: playlists.id,
+        updatedAt: playlists.updatedAt,
+      })
+      .from(playlists)
+      .where(eq(playlists.isPublic, true))
+      .orderBy(desc(playlists.updatedAt));
+  }
 }

@@ -688,4 +688,137 @@ export class ComicService {
     await this.cacheService.invalidateComicCache();
     return { message: 'Comic cache cleared successfully' };
   }
+
+  /**
+   * Get all comics for sitemap (optimized - only id, slug, updatedAt)
+   * Returns paginated results to avoid memory issues
+   */
+  async getSitemapComics(page = 1, limit = 1000): Promise<{
+    comics: Array<{ id: number; slug: string; updatedAt: Date | null }>;
+    total: number;
+    totalPages: number;
+    page: number;
+  }> {
+    const cacheKey = `sitemap:comics:${page}:${limit}`;
+
+    return this.cacheService.wrap(
+      cacheKey,
+      async () => {
+        const offset = (page - 1) * limit;
+
+        const [results, countResult] = await Promise.all([
+          this.db
+            .select({
+              id: comics.id,
+              slug: comics.slug,
+              updatedAt: comics.updatedAt,
+            })
+            .from(comics)
+            .orderBy(desc(comics.updatedAt))
+            .limit(limit)
+            .offset(offset),
+          this.db
+            .select({ count: sql<number>`count(*)` })
+            .from(comics),
+        ]);
+
+        const total = Number(countResult[0]?.count || 0);
+
+        return {
+          comics: results,
+          total,
+          totalPages: Math.ceil(total / limit),
+          page,
+        };
+      },
+      CACHE_TTL.LONG, // 2 hours
+    );
+  }
+
+  /**
+   * Get all chapters for sitemap (optimized)
+   * Returns paginated results grouped by comic
+   */
+  async getSitemapChapters(page = 1, limit = 5000): Promise<{
+    chapters: Array<{
+      id: number;
+      comicId: number;
+      chapterNumber: number;
+      updatedAt: Date | null;
+    }>;
+    total: number;
+    totalPages: number;
+    page: number;
+  }> {
+    const cacheKey = `sitemap:chapters:${page}:${limit}`;
+
+    return this.cacheService.wrap(
+      cacheKey,
+      async () => {
+        const offset = (page - 1) * limit;
+
+        // Join chapters with comic_scans to get comic_id
+        const [results, countResult] = await Promise.all([
+          this.db
+            .select({
+              id: chapters.id,
+              comicId: comicScans.comicId,
+              chapterNumber: chapters.chapterNumber,
+              updatedAt: chapters.updatedAt,
+            })
+            .from(chapters)
+            .innerJoin(comicScans, eq(chapters.comicScanId, comicScans.id))
+            .orderBy(desc(chapters.updatedAt))
+            .limit(limit)
+            .offset(offset),
+          this.db
+            .select({ count: sql<number>`count(*)` })
+            .from(chapters),
+        ]);
+
+        const total = Number(countResult[0]?.count || 0);
+
+        return {
+          chapters: results,
+          total,
+          totalPages: Math.ceil(total / limit),
+          page,
+        };
+      },
+      CACHE_TTL.LONG, // 2 hours
+    );
+  }
+
+  /**
+   * Get sitemap stats (total counts)
+   */
+  async getSitemapStats(): Promise<{
+    totalComics: number;
+    totalChapters: number;
+    comicPages: number;
+    chapterPages: number;
+  }> {
+    const cacheKey = 'sitemap:stats';
+
+    return this.cacheService.wrap(
+      cacheKey,
+      async () => {
+        const [comicCount, chapterCount] = await Promise.all([
+          this.db.select({ count: sql<number>`count(*)` }).from(comics),
+          this.db.select({ count: sql<number>`count(*)` }).from(chapters),
+        ]);
+
+        const totalComics = Number(comicCount[0]?.count || 0);
+        const totalChapters = Number(chapterCount[0]?.count || 0);
+
+        return {
+          totalComics,
+          totalChapters,
+          comicPages: Math.ceil(totalComics / 1000),
+          chapterPages: Math.ceil(totalChapters / 5000),
+        };
+      },
+      CACHE_TTL.LONG, // 2 hours
+    );
+  }
 }

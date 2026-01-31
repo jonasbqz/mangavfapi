@@ -56,6 +56,12 @@ export class PlaylistsController {
     );
   }
 
+  @Get('sitemap/list')
+  @ApiOperation({ summary: 'Get public playlists for sitemap (optimized)' })
+  async getSitemapPlaylists() {
+    return this.playlistsService.getSitemapPlaylists();
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get a playlist by ID (public if public, or owner)' })
   async findById(

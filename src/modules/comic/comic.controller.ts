@@ -149,4 +149,36 @@ export class ComicController {
   async clearCache() {
     return this.comicService.clearComicCache();
   }
+
+  @Get('sitemap/stats')
+  @ApiOperation({ summary: 'Get sitemap statistics (total counts)' })
+  async getSitemapStats() {
+    return this.comicService.getSitemapStats();
+  }
+
+  @Get('sitemap/comics')
+  @ApiOperation({ summary: 'Get comics for sitemap (optimized, paginated)' })
+  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (default: 1)' })
+  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Items per page (default: 1000, max: 5000)' })
+  async getSitemapComics(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const pageNum = page ? parseInt(page, 10) : 1;
+    const limitNum = Math.min(limit ? parseInt(limit, 10) : 1000, 5000);
+    return this.comicService.getSitemapComics(pageNum, limitNum);
+  }
+
+  @Get('sitemap/chapters')
+  @ApiOperation({ summary: 'Get chapters for sitemap (optimized, paginated)' })
+  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (default: 1)' })
+  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Items per page (default: 5000, max: 10000)' })
+  async getSitemapChapters(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const pageNum = page ? parseInt(page, 10) : 1;
+    const limitNum = Math.min(limit ? parseInt(limit, 10) : 5000, 10000);
+    return this.comicService.getSitemapChapters(pageNum, limitNum);
+  }
 }
