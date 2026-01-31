@@ -11,6 +11,7 @@ import { BookmarkModule } from './modules/bookmark/bookmark.module';
 import { ReadingHistoryModule } from './modules/reading-history/reading-history.module';
 import { ScraperModule } from './modules/scraper/scraper.module';
 import { LikesModule } from './modules/likes/likes.module';
+import { ChapterLikesModule } from './modules/chapter-likes/chapter-likes.module';
 import { CommentsModule } from './modules/comments/comments.module';
 import { PlaylistsModule } from './modules/playlists/playlists.module';
 import { DownloadsModule } from './modules/downloads/downloads.module';
@@ -32,6 +33,7 @@ import { DownloadsModule } from './modules/downloads/downloads.module';
     ReadingHistoryModule,
     ScraperModule,
     LikesModule,
+    ChapterLikesModule,
     CommentsModule,
     PlaylistsModule,
     DownloadsModule,

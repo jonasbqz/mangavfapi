@@ -32,6 +32,7 @@ export const CACHE_KEYS = {
 
   // Likes
   LIKES_COUNT: 'likes:count',
+  CHAPTER_LIKES_COUNT: 'chapter_likes:count',
 
   // Comments
   COMMENTS_COUNT: 'comments:count',

@@ -117,6 +117,7 @@ export const chapters = pgTable('chapters', {
   releaseDate: timestamp('release_date'),
   urlPages: jsonb('url_pages').$type<string[]>().default([]),
   views: integer('views').default(0),
+  likes: integer('likes').default(0),
   copyrighted: boolean('copyrighted').default(false),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
@@ -165,6 +166,18 @@ export const likes = pgTable('likes', {
   profileComicIdx: uniqueIndex('likes_profile_comic_idx').on(table.profileId, table.comicId),
   profileIdx: index('likes_profile_idx').on(table.profileId),
   comicIdx: index('likes_comic_idx').on(table.comicId),
+}));
+
+// Chapter Likes - Para trackear qué usuario dio like a qué capítulo
+export const chapterLikes = pgTable('chapter_likes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  profileId: uuid('profile_id').references(() => profiles.id, { onDelete: 'cascade' }).notNull(),
+  chapterId: integer('chapter_id').references(() => chapters.id, { onDelete: 'cascade' }).notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => ({
+  profileChapterIdx: uniqueIndex('chapter_likes_profile_chapter_idx').on(table.profileId, table.chapterId),
+  profileIdx: index('chapter_likes_profile_idx').on(table.profileId),
+  chapterIdx: index('chapter_likes_chapter_idx').on(table.chapterId),
 }));
 
 // Comments - Sistema de comentarios con respuestas anidadas
@@ -216,6 +229,7 @@ export const profilesRelations = relations(profiles, ({ many }) => ({
   bookmarks: many(bookmarks),
   readingHistory: many(readingHistory),
   likes: many(likes),
+  chapterLikes: many(chapterLikes),
   comments: many(comments),
   playlists: many(playlists),
 }));
@@ -240,6 +254,7 @@ export const chaptersRelations = relations(chapters, ({ one, many }) => ({
   comicScan: one(comicScans, { fields: [chapters.comicScanId], references: [comicScans.id] }),
   readingHistory: many(readingHistory),
   comments: many(comments),
+  chapterLikes: many(chapterLikes),
 }));
 
 export const bookmarksRelations = relations(bookmarks, ({ one }) => ({
@@ -270,6 +285,12 @@ export const scanGroupsRelations = relations(scanGroups, ({ many }) => ({
 export const likesRelations = relations(likes, ({ one }) => ({
   profile: one(profiles, { fields: [likes.profileId], references: [profiles.id] }),
   comic: one(comics, { fields: [likes.comicId], references: [comics.id] }),
+}));
+
+// Chapter Likes relations
+export const chapterLikesRelations = relations(chapterLikes, ({ one }) => ({
+  profile: one(profiles, { fields: [chapterLikes.profileId], references: [profiles.id] }),
+  chapter: one(chapters, { fields: [chapterLikes.chapterId], references: [chapters.id] }),
 }));
 
 // Comments relations
