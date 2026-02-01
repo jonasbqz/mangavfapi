@@ -120,7 +120,7 @@ export class OlympusAdapter {
         }
 
         this.logger.debug(`Page ${page}: found ${foundOnPage} new comics`);
-        await this.delay(500); // Shorter delay for update page discovery
+        await this.delay(200); // Shorter delay for update page discovery
       } catch (error) {
         this.logger.error(`Failed to fetch page ${page}: ${error}`);
         break;
@@ -227,7 +227,7 @@ export class OlympusAdapter {
           result.chapters++;
           this.logger.log(`Added chapter ${chapter.chapterNumber} for ${comic.title}`);
         }
-        await this.delay(300); // Short delay between chapter page fetches
+        await this.delay(80); // Short delay between chapter page fetches
       } catch (error) {
         this.logger.warn(`Failed to scrape chapter ${chapterItem.id}: ${error}`);
       }

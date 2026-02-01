@@ -148,7 +148,7 @@ export class IkigaiAdapter {
           await this.upsertChapter(comicId, chapter, chapterItem);
           result.chapters++;
         }
-        await this.delay(500);
+        await this.delay(200);
       } catch (error) {
         this.logger.warn(`Failed to scrape chapter ${chapterItem.url}: ${error}`);
       }
@@ -284,7 +284,7 @@ export class IkigaiAdapter {
         }
 
         page++;
-        await this.delay(300);
+        await this.delay(80);
       } catch (error) {
         this.logger.error(`Failed to fetch chapter list page ${page}: ${error}`);
         break;
