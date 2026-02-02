@@ -33,11 +33,11 @@ export const auth = betterAuth({
     },
   },
   session: {
-    expiresIn: 60 * 60 * 24 * 7, // 7 days
-    updateAge: 60 * 60 * 24, // 1 day
+    expiresIn: 60 * 60 * 24 * 30, // 30 days
+    updateAge: 60 * 60 * 24 * 7, // 7 days (refresh session weekly)
     cookieCache: {
       enabled: true,
-      maxAge: 60 * 5, // 5 minutes
+      maxAge: 60 * 60, // 1 hour cache
     },
   },
   trustedOrigins: [
@@ -46,17 +46,17 @@ export const auth = betterAuth({
     'https://api.mangolibreria.com',
     'https://www.mangolibreria.com'
   ],
-  // advanced: {
-  //   crossSubDomainCookies: {
-  //     enabled: true,
-  //     // domain: process.env.NODE_ENV === 'production' ? '.mangolibreria.com' : undefined,
-  //   },
-  //   defaultCookieAttributes: {
-  //     // secure: process.env.NODE_ENV === 'production',
-  //     httpOnly: true,
-  //     sameSite: 'lax',
-  //   },
-  // },
+  advanced: {
+    crossSubDomainCookies: {
+      enabled: true,
+      domain: process.env.NODE_ENV === 'production' ? '.mangolibreria.com' : undefined,
+    },
+    defaultCookieAttributes: {
+      secure: process.env.NODE_ENV === 'production',
+      httpOnly: true,
+      sameSite: 'lax',
+    },
+  },
 });
 
 export type Session = typeof auth.$Infer.Session;
