@@ -17,7 +17,7 @@ export class IkigaiAdapter {
 
   constructor(
     private db: NodePgDatabase<typeof schema>,
-    private delayMs: number = 2000,
+    private delayMs: number = 100,
     baseUrl?: string,
   ) {
     this.baseUrl = baseUrl || process.env.SCRAPER_IKIGAI_URL || IKIGAI_ORIGIN;

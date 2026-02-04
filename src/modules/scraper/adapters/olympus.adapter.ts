@@ -20,7 +20,7 @@ export class OlympusAdapter {
 
   constructor(
     private db: NodePgDatabase<typeof schema>,
-    private delayMs: number = 2000,
+    private delayMs: number = 100,
   ) {}
 
   async scrape(startPage = 1, endPage = 5): Promise<ScraperResult> {

@@ -46,7 +46,7 @@ export abstract class BaseScraperAdapter {
 
   constructor(
     protected db: NodePgDatabase<typeof schema>,
-    delayMs = 2000,
+    delayMs = 100,
   ) {
     this.delayMs = delayMs;
   }
