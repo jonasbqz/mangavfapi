@@ -165,7 +165,7 @@ export class OlympusAdapter {
     const maxPages = 50; // Safety limit
 
     while (page <= maxPages) {
-      const chaptersUrl = `${OLYMPUS_API}/series/${data.slug}/chapters?page=${page}&type=comic`;
+      const chaptersUrl = `${OLYMPUS_API}/series/${data.slug}/chapters?page=${page}}&direction=desc&type=comic`;
       const chaptersResponse = await this.fetchJson<OlympusApiResponse>(chaptersUrl);
 
       if (!chaptersResponse.data || !Array.isArray(chaptersResponse.data) || chaptersResponse.data.length === 0) {
