@@ -15,6 +15,13 @@
       "when": 1769866254829,
       "tag": "0001_supreme_vermin",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1771095557624,
+      "tag": "0002_foamy_blindfold",
+      "breakpoints": true
     }
   ]
 }

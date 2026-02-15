@@ -77,6 +77,7 @@ export const comics = pgTable('comics', {
   likes: integer('likes').default(0),
   followers: integer('followers').default(0),
   isNsfw: boolean('is_nsfw').default(false),
+  isHentai: boolean('is_hentai').default(false),
   copyrighted: boolean('copyrighted').default(false),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
@@ -84,6 +85,7 @@ export const comics = pgTable('comics', {
   slugIdx: index('comics_slug_idx').on(table.slug),
   titleIdx: index('comics_title_idx').on(table.title),
   statusIdx: index('comics_status_idx').on(table.status),
+  isHentaiIdx: index('comics_is_hentai_idx').on(table.isHentai),
 }));
 
 // Comic Scans (relation between comics and scan groups)

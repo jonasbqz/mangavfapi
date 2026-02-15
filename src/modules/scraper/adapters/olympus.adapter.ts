@@ -4,7 +4,7 @@ import type * as schema from '@/database/schema';
 import { eq, and, desc } from 'drizzle-orm';
 import { comics, chapters, comicScans, scanGroups, genres, comicGenres } from '@/database/schema';
 import type { ScrapedComic, ScrapedChapter, ChapterListItem, ScraperResult } from '../scraper.types';
-import { isAdultGenreSlug } from './base.adapter';
+import { isAdultGenreSlug, isHentaiGenreSlug } from './base.adapter';
 
 const OLYMPUS_API = 'https://dashboard.olympusbiblioteca.com/api';
 const OLYMPUS_ORIGIN = 'https://dashboard.olympusbiblioteca.com';
@@ -414,20 +414,21 @@ export class OlympusAdapter {
   }
 
   private async syncGenres(comicId: number, genreNames: string[]): Promise<void> {
-    // Delete existing
     await this.db.delete(comicGenres).where(eq(comicGenres.comicId, comicId));
 
     let hasAdultGenre = false;
+    let hasHentaiGenre = false;
 
     for (const name of genreNames) {
       const slug = this.slugify(name);
 
-      // Check if this is an adult genre
       if (isAdultGenreSlug(slug)) {
         hasAdultGenre = true;
       }
+      if (isHentaiGenreSlug(slug)) {
+        hasHentaiGenre = true;
+      }
 
-      // Get or create genre
       let genre = await this.db.query.genres.findFirst({
         where: eq(genres.slug, slug),
       });
@@ -440,16 +441,15 @@ export class OlympusAdapter {
         genre = created;
       }
 
-      // Link to comic
       await this.db.insert(comicGenres).values({
         comicId,
         genreId: genre.id,
       }).onConflictDoNothing();
     }
 
-    // Update comic's isNsfw based on genres
     await this.db.update(comics).set({
       isNsfw: hasAdultGenre,
+      isHentai: hasHentaiGenre,
     }).where(eq(comics.id, comicId));
   }
 

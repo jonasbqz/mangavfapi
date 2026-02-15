@@ -19,9 +19,9 @@ export class ScraperController {
 
   @Post('trigger')
   @ApiOperation({ summary: 'Manually trigger a scraper' })
-  @ApiQuery({ name: 'name', required: true, type: String, enum: ['olympus', 'ikigai'] })
+  @ApiQuery({ name: 'name', required: true, type: String, enum: ['olympus', 'ikigai', 'peerless'] })
   @ApiQuery({ name: 'startPage', required: false, type: Number, description: 'Start page (default: 1)' })
-  @ApiQuery({ name: 'endPage', required: false, type: Number, description: 'End page (default: 5 for olympus, 10 for ikigai)' })
+  @ApiQuery({ name: 'endPage', required: false, type: Number, description: 'End page (default: 5 for olympus, 10 for ikigai/peerless)' })
   @ApiResponse({ status: 200, description: 'Scraper completed' })
   @ApiResponse({ status: 409, description: 'That scraper is already running' })
   async trigger(

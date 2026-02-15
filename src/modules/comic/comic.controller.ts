@@ -91,9 +91,14 @@ export class ComicController {
   @Get('genres')
   @ApiOperation({ summary: 'Get all genres' })
   @ApiQuery({ name: 'nsfw', required: false, type: Boolean, description: 'Include adult genres' })
-  async getGenres(@Query('nsfw') nsfw?: string) {
+  @ApiQuery({ name: 'hentai', required: false, type: Boolean, description: 'Include hentai genres (hidden mode)' })
+  async getGenres(
+    @Query('nsfw') nsfw?: string,
+    @Query('hentai') hentai?: string,
+  ) {
     const includeAdult = nsfw === 'true';
-    return this.comicService.getAllGenres(includeAdult);
+    const includeHentai = hentai === 'true';
+    return this.comicService.getAllGenres(includeAdult, includeHentai);
   }
 
   @Get('popular')
@@ -105,7 +110,59 @@ export class ComicController {
     @Query('nsfw') nsfw?: string,
   ) {
     const isNsfw = nsfw === 'false' ? false : nsfw === 'true' ? true : undefined;
-    return this.comicService.getPopular(limit ? parseInt(limit, 10) : 10, isNsfw);
+    return this.comicService.getPopular(limit ? parseInt(limit, 10) : 10, isNsfw, false);
+  }
+
+  // === Hidden (hentai-only) endpoints — MUST be before :id ===
+
+  @Get('hidden')
+  @ApiOperation({ summary: 'Search hidden (hentai) comics' })
+  @ApiQuery({ name: 'search', required: false })
+  @ApiQuery({ name: 'type', required: false, enum: ['manga', 'manhwa', 'manhua'] })
+  @ApiQuery({ name: 'status', required: false, enum: ['ongoing', 'completed', 'hiatus', 'cancelled'] })
+  @ApiQuery({ name: 'genres', required: false, description: 'Comma-separated genre names' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'orderBy', required: false, enum: ['recent_chapter', 'created_at', 'views', 'updated_at'] })
+  @ApiQuery({ name: 'isDesc', required: false, type: Boolean })
+  async findAllHidden(
+    @Query('search') search?: string,
+    @Query('type') type?: 'manga' | 'manhwa' | 'manhua',
+    @Query('status') status?: 'ongoing' | 'completed' | 'hiatus' | 'cancelled',
+    @Query('genres') genres?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('orderBy') orderBy?: string,
+    @Query('isDesc') isDesc?: string,
+  ) {
+    const filters: ComicFilters = {
+      search,
+      type,
+      status,
+      genreNames: genres ? genres.split(',').map(g => g.trim()).filter(Boolean) : undefined,
+      isNsfw: true,
+      isHentai: true,
+      page: page ? parseInt(page, 10) : 1,
+      limit: limit ? parseInt(limit, 10) : 20,
+      orderBy: (orderBy as ComicFilters['orderBy']) || 'recent_chapter',
+      isDesc: isDesc !== 'false',
+    };
+
+    return this.comicService.findAll(filters);
+  }
+
+  @Get('hidden/trending')
+  @ApiOperation({ summary: 'Get trending hidden (hentai) comics' })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async getHiddenTrending(@Query('limit') limit?: string) {
+    return this.comicService.getTrending(limit ? parseInt(limit, 10) : 10, undefined, true);
+  }
+
+  @Get('hidden/recent-chapters')
+  @ApiOperation({ summary: 'Get hidden (hentai) comics with recent chapters' })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async getHiddenRecentChapters(@Query('limit') limit?: string) {
+    return this.comicService.getRecentWithChapters(limit ? parseInt(limit, 10) : 20, undefined, true);
   }
 
   @Get(':id/recommendations')
@@ -136,11 +193,11 @@ export class ComicController {
     return comic;
   }
 
-  @Post('admin/sync-nsfw')
-  @ApiOperation({ summary: 'Sync NSFW flags for all comics based on their genres' })
+  @Post('admin/sync-flags')
+  @ApiOperation({ summary: 'Sync isNsfw and isHentai flags for all comics based on their genres' })
   @ApiResponse({ status: 200, description: 'Returns number of updated comics and their details' })
-  async syncNsfwFlags() {
-    return this.comicService.syncNsfwFlags();
+  async syncFlags() {
+    return this.comicService.syncFlags();
   }
 
   @Post('admin/clear-cache')

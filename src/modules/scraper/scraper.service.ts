@@ -7,6 +7,7 @@ import type * as schema from '@/database/schema';
 import { ScraperQueue } from './scraper.queue';
 import { OlympusAdapter } from './adapters/olympus.adapter';
 import { IkigaiAdapter } from './adapters/ikigai.adapter';
+import { PeerlessAdapter } from './adapters/m440.adapter';
 import type { ScraperResult } from './scraper.types';
 
 @Injectable()
@@ -26,8 +27,9 @@ export class ScraperService implements OnModuleInit {
   async onModuleInit() {
     this.logger.log('Server started. Triggering initial scrape tasks...');
 
-    this.scrapeIkigai(1, 2).catch(err => this.logger.error(`Initial Ikigai scrape failed: ${err}`));
-    this.scrapeOlympus(1, 2).catch(err => this.logger.error(`Initial Olympus scrape failed: ${err}`));
+    this.scrapeIkigai(1, 1).catch(err => this.logger.error(`Initial Ikigai scrape failed: ${err}`));
+    this.scrapeOlympus(1, 1).catch(err => this.logger.error(`Initial Olympus scrape failed: ${err}`));
+    this.scrapePeerless(1, 1).catch(err => this.logger.error(`Initial Peerless scrape failed: ${err}`));
   }
 
   getStatus() {
@@ -53,6 +55,8 @@ export class ScraperService implements OnModuleInit {
         return this.scrapeOlympus(options?.startPage, options?.endPage);
       case 'ikigai':
         return this.scrapeIkigai(options?.startPage, options?.endPage);
+      case 'peerless':
+        return this.scrapePeerless(options?.startPage, options?.endPage);
       default:
         throw new Error(`Unknown scraper: ${scraperName}`);
     }
@@ -61,7 +65,7 @@ export class ScraperService implements OnModuleInit {
   /**
    * Scheduled scraping - Ikigai every hour
    */
-  @Cron(CronExpression.EVERY_HOUR)
+  // @Cron(CronExpression.EVERY_HOUR)
   async scheduledIkigai() {
     if (!this.queue.isRunning('ikigai')) {
       this.logger.log('Starting scheduled Ikigai scrape');
@@ -72,11 +76,22 @@ export class ScraperService implements OnModuleInit {
   /**
    * Scheduled scraping - Olympus every 2 hours
    */
-  @Cron(CronExpression.EVERY_2_HOURS)
+  // @Cron(CronExpression.EVERY_2_HOURS)
   async scheduledOlympus() {
     if (!this.queue.isRunning('olympus')) {
       this.logger.log('Starting scheduled Olympus scrape');
       await this.scrapeOlympus(1, 3);
+    }
+  }
+
+  /**
+   * Scheduled scraping - Peerless every hour
+   */
+  @Cron(CronExpression.EVERY_HOUR)
+  async scheduledPeerless() {
+    if (!this.queue.isRunning('peerless')) {
+      this.logger.log('Starting scheduled Peerless scrape');
+      await this.scrapePeerless(1, 5);
     }
   }
 
@@ -105,6 +120,22 @@ export class ScraperService implements OnModuleInit {
 
       this.logger.log(
         `Ikigai scrape completed: ${result.comics} comics, ${result.chapters} chapters, ${result.errors.length} errors`,
+      );
+
+      return result;
+    });
+  }
+
+  private async scrapePeerless(startPage = 1, endPage = 10): Promise<ScraperResult> {
+    return this.queue.enqueue('peerless', async () => {
+      this.logger.log(`Scraping Peerless pages ${startPage}-${endPage}...`);
+
+      const baseUrl = this.configService.get<string>('SCRAPER_PEERLESS_URL');
+      const adapter = new PeerlessAdapter(this.db, this.delayMs, baseUrl);
+      const result = await adapter.scrape(startPage, endPage);
+
+      this.logger.log(
+        `Peerless scrape completed: ${result.comics} comics, ${result.chapters} chapters, ${result.errors.length} errors`,
       );
 
       return result;
