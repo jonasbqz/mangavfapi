@@ -65,7 +65,7 @@ export class ScraperService implements OnModuleInit {
   /**
    * Scheduled scraping - Ikigai every hour
    */
-  // @Cron(CronExpression.EVERY_HOUR)
+  @Cron(CronExpression.EVERY_HOUR)
   async scheduledIkigai() {
     if (!this.queue.isRunning('ikigai')) {
       this.logger.log('Starting scheduled Ikigai scrape');
@@ -76,7 +76,7 @@ export class ScraperService implements OnModuleInit {
   /**
    * Scheduled scraping - Olympus every 2 hours
    */
-  // @Cron(CronExpression.EVERY_2_HOURS)
+  @Cron(CronExpression.EVERY_2_HOURS)
   async scheduledOlympus() {
     if (!this.queue.isRunning('olympus')) {
       this.logger.log('Starting scheduled Olympus scrape');
