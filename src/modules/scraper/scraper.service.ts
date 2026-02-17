@@ -27,8 +27,8 @@ export class ScraperService implements OnModuleInit {
   async onModuleInit() {
     this.logger.log('Server started. Triggering initial scrape tasks...');
 
-    this.scrapeIkigai(1, 2).catch(err => this.logger.error(`Initial Ikigai scrape failed: ${err}`));
-    this.scrapeOlympus(1, 2).catch(err => this.logger.error(`Initial Olympus scrape failed: ${err}`));
+    this.scrapeIkigai(1, 5).catch(err => this.logger.error(`Initial Ikigai scrape failed: ${err}`));
+    this.scrapeOlympus(1, 5).catch(err => this.logger.error(`Initial Olympus scrape failed: ${err}`));
     this.scrapePeerless(30,32).catch(err => this.logger.error(`Initial Peerless scrape failed: ${err}`));
   }
 
@@ -69,7 +69,7 @@ export class ScraperService implements OnModuleInit {
   async scheduledIkigai() {
     if (!this.queue.isRunning('ikigai')) {
       this.logger.log('Starting scheduled Ikigai scrape');
-      await this.scrapeIkigai(1, 5);
+      await this.scrapeIkigai(1, 1);
     }
   }
 
@@ -80,7 +80,7 @@ export class ScraperService implements OnModuleInit {
   async scheduledOlympus() {
     if (!this.queue.isRunning('olympus')) {
       this.logger.log('Starting scheduled Olympus scrape');
-      await this.scrapeOlympus(1, 3);
+      await this.scrapeOlympus(1, 1);
     }
   }
 
@@ -91,7 +91,7 @@ export class ScraperService implements OnModuleInit {
   async scheduledPeerless() {
     if (!this.queue.isRunning('peerless')) {
       this.logger.log('Starting scheduled Peerless scrape');
-      await this.scrapePeerless(1, 5);
+      await this.scrapePeerless(1, 1);
     }
   }
 
