@@ -77,22 +77,30 @@ export class ComicService {
         const comicsWithGenres = await this.db
           .select({ comicId: comicGenres.comicId })
           .from(comicGenres)
-          .where(inArray(comicGenres.genreId, genreIdsFromNames));
+          .where(inArray(comicGenres.genreId, genreIdsFromNames))
+          .groupBy(comicGenres.comicId)
+          .having(sql`count(distinct ${comicGenres.genreId}) >= ${genreIdsFromNames.length}`);
         const comicIds = comicsWithGenres.map(c => c.comicId);
         if (comicIds.length > 0) {
           conditions.push(inArray(comics.id, comicIds));
         } else {
           conditions.push(eq(comics.id, -1));
         }
+      } else {
+        conditions.push(eq(comics.id, -1));
       }
     } else if (genreIds?.length) {
       const comicsWithGenres = await this.db
         .select({ comicId: comicGenres.comicId })
         .from(comicGenres)
-        .where(inArray(comicGenres.genreId, genreIds));
+        .where(inArray(comicGenres.genreId, genreIds))
+        .groupBy(comicGenres.comicId)
+        .having(sql`count(distinct ${comicGenres.genreId}) >= ${genreIds.length}`);
       const comicIds = comicsWithGenres.map(c => c.comicId);
       if (comicIds.length > 0) {
         conditions.push(inArray(comics.id, comicIds));
+      } else {
+        conditions.push(eq(comics.id, -1));
       }
     }
 
@@ -564,72 +572,102 @@ export class ComicService {
     return comicScan;
   }
 
-  async getRecommendations(comicId: number, limit = 10, isNsfw?: boolean) {
+  async getRecommendations(comicId: number, limit = 5, isNsfw?: boolean) {
     const nsfwKey = isNsfw === undefined ? 'all' : isNsfw ? 'nsfw' : 'safe';
     const cacheKey = `${CACHE_KEYS.COMIC_RECOMMENDATIONS}:${comicId}:${limit}:${nsfwKey}`;
 
     return this.cacheService.wrap(
       cacheKey,
       () => this.getRecommendationsFromDb(comicId, limit, isNsfw),
-      CACHE_TTL.LONG, // 2 hours
+      CACHE_TTL.STATIC, // 24 hours
     );
   }
 
-  private async getRecommendationsFromDb(comicId: number, limit = 10, isNsfw?: boolean) {
-    // Get the comic's genres
-    const comicGenreRecords = await this.db.query.comicGenres.findMany({
-      where: eq(comicGenres.comicId, comicId),
+  private async getRecommendationsFromDb(comicId: number, limit = 5, isNsfw?: boolean) {
+    // Get the comic's genres and title
+    const sourceComic = await this.db.query.comics.findFirst({
+      where: eq(comics.id, comicId),
+      with: { comicGenres: true }
     });
 
-    const genreIds = comicGenreRecords.map(cg => cg.genreId);
+    if (!sourceComic) return [];
 
+    const genreIds = sourceComic.comicGenres.map(cg => cg.genreId);
+    
+    // Strict SFW / NSFW enforcement. If source is NSFW, only recommend NSFW.
+    // If source is SFW, only recommend SFW.
+    const isSourceNsfw = sourceComic.isNsfw ?? false;
+    // We enforce this regardless of the `isNsfw` parameter to prevent mixing content types
+    const strictNsfwCondition = eq(comics.isNsfw, isSourceNsfw);
+    
     let recommendedComics: any[] = [];
 
     if (genreIds.length > 0) {
-      // Find comics with the same genres, excluding the current comic
+      // Find comics that share the most genres, combined with title similarity, excluding the current comic
+      const genreOverlapCount = sql<number>`count(distinct ${comicGenres.genreId})`;
+      
+      const similarityExpr = sql`GREATEST(
+        similarity(${comics.title}, unaccent(${sourceComic.title})),
+        0
+      )`;
+      
+      // We want to rank by a combination of genre overlap, title similarity, and views
+      const rankExpr = sql`${genreOverlapCount} * 10 + ${similarityExpr} * 20 + log(${comics.views} + 1)`;
+
       const comicsWithSameGenres = await this.db
-        .select({ comicId: comicGenres.comicId })
+        .select({ 
+          comicId: comicGenres.comicId,
+        })
         .from(comicGenres)
-        .where(inArray(comicGenres.genreId, genreIds));
+        .innerJoin(comics, eq(comics.id, comicGenres.comicId))
+        .where(
+          and(
+            inArray(comicGenres.genreId, genreIds),
+            eq(comics.isHentai, false),
+            strictNsfwCondition
+          )
+        )
+        .groupBy(comicGenres.comicId, comics.title, comics.views)
+        .orderBy(desc(rankExpr))
+        .limit(limit * 2);
 
       const comicIds = [...new Set(comicsWithSameGenres.map(c => c.comicId))]
-        .filter(id => id !== comicId);
+        .filter(id => id !== comicId)
+        .slice(0, limit);
 
       if (comicIds.length > 0) {
-        const conditions = [inArray(comics.id, comicIds), eq(comics.isHentai, false)];
-        if (isNsfw !== undefined) {
-          conditions.push(eq(comics.isNsfw, isNsfw));
-        }
-
-        // Get comics ordered by views (popularity within same genres)
+        // Fetch full data for the best matches
         recommendedComics = await this.db.query.comics.findMany({
-          where: and(...conditions),
-          orderBy: [desc(comics.views)],
-          limit,
+          where: inArray(comics.id, comicIds),
           with: {
             comicGenres: {
               with: { genre: true },
             },
           },
         });
+        
+        // Restore order
+        const comicMap = new Map(recommendedComics.map(c => [c.id, c]));
+        recommendedComics = comicIds.map(id => comicMap.get(id)).filter(Boolean);
       }
     }
 
-    // If no recommendations by genre, fallback to popular comics
+    // If no recommendations or not enough, fallback to popular comics of the SAME SFW/NSFW category
     if (recommendedComics.length < limit) {
       const existingIds = recommendedComics.map(c => c.id);
       existingIds.push(comicId); // Exclude current comic
 
-      const conditions = [eq(comics.isHentai, false)];
+      const conditions = [
+        eq(comics.isHentai, false),
+        strictNsfwCondition
+      ];
+      
       if (existingIds.length > 0) {
         conditions.push(sql`${comics.id} NOT IN (${sql.join(existingIds.map(id => sql`${id}`), sql`, `)})`);
       }
-      if (isNsfw !== undefined) {
-        conditions.push(eq(comics.isNsfw, isNsfw));
-      }
 
       const popularComics = await this.db.query.comics.findMany({
-        where: conditions.length > 0 ? and(...conditions) : undefined,
+        where: and(...conditions),
         orderBy: [desc(comics.views)],
         limit: limit - recommendedComics.length,
         with: {
