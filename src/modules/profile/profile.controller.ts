@@ -53,6 +53,27 @@ export class ProfileController {
     return this.profileService.getStats(user.profileId!);
   }
 
+  @Get('me/validate-premium')
+  @UseGuards(AuthGuard, ProfileGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Validate if current user has premium access' })
+  async validatePremium(@CurrentUser() user: UserSession) {
+    const profile = await this.profileService.findById(user.profileId!);
+    if (!profile) {
+      throw new NotFoundException('Profile not found');
+    }
+
+    const isPremium = profile.plan === 'premium' && 
+      (profile.premiumExpireAt === null || profile.premiumExpireAt > new Date());
+
+    return {
+      isValid: true,
+      isPremium,
+      plan: profile.plan,
+      premiumExpireAt: profile.premiumExpireAt,
+    };
+  }
+
   @Put('me')
   @UseGuards(AuthGuard, ProfileGuard)
   @ApiBearerAuth()
