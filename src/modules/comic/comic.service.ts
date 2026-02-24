@@ -583,7 +583,7 @@ export class ComicService {
     );
   }
 
-  private async getRecommendationsFromDb(comicId: number, limit = 5, isNsfw?: boolean) {
+  private async getRecommendationsFromDb(comicId: number, limit = 3, isNsfw?: boolean) {
     // Get the comic's genres and title
     const sourceComic = await this.db.query.comics.findFirst({
       where: eq(comics.id, comicId),
