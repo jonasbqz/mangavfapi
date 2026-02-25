@@ -7,11 +7,10 @@ import { comics, chapters, comicScans, scanGroups, genres, comicGenres } from '@
 import type { ScrapedComic, ScrapedChapter, ChapterListItem, ScraperResult } from '../scraper.types';
 import { isAdultGenreSlug, BaseScraperAdapter } from './base.adapter';
 
-const IKIGAI_ORIGIN = 'https://ikigaimangas.com';
-const IKIGAI_MEDIA = 'https://media.ikigaimangas.cloud';
+const NOBLEDICION_ORIGIN = 'https://nobledicion.yoveo.xyz';
 
-export class IkigaiAdapter extends BaseScraperAdapter {
-  private readonly logger = new Logger(IkigaiAdapter.name);
+export class NobledicionAdapter extends BaseScraperAdapter {
+  private readonly logger = new Logger(NobledicionAdapter.name);
   private scanGroupId: number | null = null;
   private baseUrl: string;
 
@@ -21,26 +20,26 @@ export class IkigaiAdapter extends BaseScraperAdapter {
     baseUrl?: string,
   ) {
     super(db, delayMs);
-    this.baseUrl = baseUrl || process.env.SCRAPER_IKIGAI_URL || IKIGAI_ORIGIN;
+    this.baseUrl = baseUrl || process.env.SCRAPER_NOBLEDICION_URL || NOBLEDICION_ORIGIN;
   }
 
-  getName() { return 'Ikigai'; }
+  getName() { return 'Nobledicion'; }
 
-  async scrape(startPage = 1, endPage = 10): Promise<ScraperResult> {
+  async scrape(startPage = 0, endPage = 3, postsPerPage = 18): Promise<ScraperResult> {
     const result: ScraperResult = { comics: 0, chapters: 0, errors: [] };
 
-    this.logger.log(`Starting Ikigai scrape: pages ${startPage}-${endPage}, baseUrl: ${this.baseUrl}`);
+    this.logger.log(`Starting Nobledicion scrape: pages ${startPage}-${endPage} (${postsPerPage} items/page), baseUrl: ${this.baseUrl}`);
 
     try {
       await this.ensureScanGroup();
       this.logger.log(`Scan group ensured: ID ${this.scanGroupId}`);
 
-      const comicUrls = await this.getRecentComicUrls(startPage, endPage);
+      const comicUrls = await this.getRecentComicUrls(startPage, endPage, postsPerPage);
       this.logger.log(`Found ${comicUrls.length} comics to scrape`);
 
       if (comicUrls.length === 0) {
-        this.logger.warn(`No comics found! Check if the URL is working: ${this.baseUrl}/series/`);
-        result.errors.push(`No comics found from ${this.baseUrl}/series/`);
+        this.logger.warn(`No comics found! Check if the Admin Ajax endpoint is working: ${this.baseUrl}/wp-admin/admin-ajax.php`);
+        result.errors.push(`No comics found from ${this.baseUrl}/wp-admin/admin-ajax.php`);
       }
 
       for (const url of comicUrls) {
@@ -54,18 +53,18 @@ export class IkigaiAdapter extends BaseScraperAdapter {
         }
       }
     } catch (error) {
-      const msg = `Ikigai scraper failed: ${error}`;
+      const msg = `Nobledicion scraper failed: ${error}`;
       this.logger.error(msg);
       result.errors.push(msg);
     }
 
-    this.logger.log(`Ikigai scrape completed: ${result.comics} comics, ${result.chapters} chapters, ${result.errors.length} errors`);
+    this.logger.log(`Nobledicion scrape completed: ${result.comics} comics, ${result.chapters} chapters, ${result.errors.length} errors`);
     return result;
   }
 
   private async ensureScanGroup(): Promise<void> {
     const existing = await this.db.query.scanGroups.findFirst({
-      where: eq(scanGroups.slug, 'ikigai'),
+      where: eq(scanGroups.slug, 'nobledicion'),
     });
 
     if (existing) {
@@ -74,34 +73,70 @@ export class IkigaiAdapter extends BaseScraperAdapter {
     }
 
     const [created] = await this.db.insert(scanGroups).values({
-      name: 'Ikigai Mangas',
-      slug: 'ikigai',
-      website: IKIGAI_ORIGIN,
+      name: 'Nobledicion Scan',
+      slug: 'nobledicion',
+      website: NOBLEDICION_ORIGIN,
     }).returning();
 
     this.scanGroupId = created.id;
   }
 
-  private async getRecentComicUrls(startPage: number, endPage: number): Promise<string[]> {
+  private async getRecentComicUrls(startPage: number, endPage: number, postsPerPage: number): Promise<string[]> {
     const urls: string[] = [];
     const seen = new Set<string>();
 
     for (let page = startPage; page <= endPage; page++) {
       try {
-        const listUrl = `${this.baseUrl}/series/?tipos[]=comic&direccion=desc&ordenar=last_chapter_date&pagina=${page}`;
-        this.logger.debug(`Fetching page ${page}: ${listUrl}`);
+        const formData = new URLSearchParams();
+        formData.append('action', 'madara_load_more');
+        formData.append('page', page.toString());
+        formData.append('template', 'madara-core/content/content-archive');
+        formData.append('vars[orderby]', 'meta_value_num');
+        formData.append('vars[paged]', '1');
+        formData.append('vars[timerange]', '');
+        formData.append('vars[posts_per_page]', postsPerPage.toString());
+        formData.append('vars[tax_query][relation]', 'OR');
+        formData.append('vars[meta_query][0][orderby]', 'meta_value_num');
+        formData.append('vars[meta_query][0][paged]', '1');
+        formData.append('vars[meta_query][0][timerange]', '');
+        formData.append('vars[meta_query][0][posts_per_page]', postsPerPage.toString());
+        formData.append('vars[meta_query][0][tax_query][relation]', 'OR');
+        formData.append('vars[meta_query][0][meta_query][relation]', 'AND');
+        formData.append('vars[meta_query][0][post_type]', 'wp-manga');
+        formData.append('vars[meta_query][0][post_status]', 'publish');
+        formData.append('vars[meta_query][0][meta_key]', '_latest_update');
+        formData.append('vars[meta_query][0][order]', 'desc');
+        formData.append('vars[meta_query][relation]', 'AND');
+        formData.append('vars[post_type]', 'wp-manga');
+        formData.append('vars[post_status]', 'publish');
+        formData.append('vars[meta_key]', '_latest_update');
 
-        const html = await this.fetchHtml(listUrl);
+        const listUrl = `${this.baseUrl}/wp-admin/admin-ajax.php`;
+        this.logger.debug(`Fetching page ${page} from: ${listUrl}`);
+
+        const response = await fetch(listUrl, {
+          method: 'POST',
+          body: formData,
+          headers: {
+             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+             'Content-Type': 'application/x-www-form-urlencoded',
+             'Referer': `${this.baseUrl}/`,
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const html = await response.text();
         this.logger.debug(`Got HTML response: ${html.length} characters`);
 
         const $ = cheerio.load(html);
 
         let foundOnPage = 0;
-        $('section > ul > li').each((_, el) => {
-          const chaptersTotal = $(el).find('a ul li:nth-child(1) span:nth-child(2)').text().trim();
-          if (chaptersTotal === '0') return;
-
-          const href = $(el).find('a').attr('href');
+        $('div.manga-title-badges').each((_, el) => {
+          // Alternatively, finding the a tag linking to manga
+          const href = $(el).closest('.page-item-detail').find('a').attr('href');
           if (href && !seen.has(href)) {
             seen.add(href);
             urls.push(this.joinUrl(this.baseUrl, href));
@@ -109,11 +144,23 @@ export class IkigaiAdapter extends BaseScraperAdapter {
           }
         });
 
+        // Fallback selector just in case wrapping structure varies
+        if (foundOnPage === 0) {
+            $('.post-title a').each((_, el) => {
+                const href = $(el).attr('href');
+                if (href && !seen.has(href)) {
+                  seen.add(href);
+                  urls.push(this.joinUrl(this.baseUrl, href));
+                  foundOnPage++;
+                }
+            });
+        }
+
         this.logger.debug(`Page ${page}: found ${foundOnPage} comics`);
 
         if (foundOnPage === 0 && page === startPage) {
-          // Log the HTML structure to help debug selector issues
           this.logger.warn(`No comics found on first page. HTML preview: ${html.substring(0, 500)}...`);
+          break; // Stop if no items found at all on this page, probably no more items
         }
 
         await this.delay();
@@ -132,7 +179,11 @@ export class IkigaiAdapter extends BaseScraperAdapter {
 
     const comic = this.parseComicFromHtml($, url);
     if (!comic.title) {
-      throw new Error('Could not parse comic title');
+        // Retry one more time without .profile-manga.summary-layout-1 constraint
+        comic.title = $('.post-title h1').text().trim();
+        if (!comic.title) {
+            throw new Error('Could not parse comic title');
+        }
     }
 
     this.logger.log(`Scraping comic: ${comic.title}`);
@@ -141,7 +192,7 @@ export class IkigaiAdapter extends BaseScraperAdapter {
     result.comics++;
 
     // Get chapter list
-    const chapterList = await this.getChapterList(url);
+    const chapterList = await this.getChapterList(url, comic.id || ""); // get madara internal POST ID if needed
     this.logger.log(`Found ${chapterList.length} chapters for ${comic.title}`);
 
     for (const chapterItem of chapterList) {
@@ -159,15 +210,20 @@ export class IkigaiAdapter extends BaseScraperAdapter {
   }
 
   private parseComicFromHtml($: cheerio.CheerioAPI, url: string): ScrapedComic {
-    const title = $('div div article div h1').first().text().trim();
-    const description = $('div div article div p').first().text().trim();
+    const layoutSelector = '.profile-manga.summary-layout-1';
+
+    // In case there are badges inside the title
+    $(layoutSelector + ' .post-title span').remove();
+    const title = $(layoutSelector).find('.post-title').text().trim();
+
+    const description = $('.description-summary p').text().trim() || $('.description-summary').text().trim();
 
     // Status
-    const statusText = $('div article figure ul li:nth-child(2)').text().toLowerCase().trim();
+    const statusText = $(layoutSelector).find('.post-status .post-content_item:nth-child(2) .summary-content').text().toLowerCase().trim();
     const statusMap: Record<string, ScrapedComic['status']> = {
+      'ongoing': 'ongoing',
       'en curso': 'ongoing',
       'activo': 'ongoing',
-      'ongoing': 'ongoing',
       'completado': 'completed',
       'completed': 'completed',
       'pausado': 'hiatus',
@@ -178,7 +234,13 @@ export class IkigaiAdapter extends BaseScraperAdapter {
     const status = statusMap[statusText] || 'ongoing';
 
     // Type
-    const typeText = $('div article figure ul li:nth-child(1)').text().toLowerCase().trim();
+    // The user mentioned it's around nth-child(7) but structure can vary
+    let typeText = $(layoutSelector).find('.post-content .post-content_item:contains("Type") .summary-content').text().toLowerCase().trim();
+    if (!typeText) {
+        // Fallback to exactly nth-child(7) if "Type" title isn't easily selected
+        typeText = $(layoutSelector).find('.post-content .post-content_item:nth-child(7) .summary-content').text().toLowerCase().trim();
+    }
+
     const typeMap: Record<string, ScrapedComic['type']> = {
       'manga': 'manga',
       'manhwa': 'manhwa',
@@ -190,13 +252,13 @@ export class IkigaiAdapter extends BaseScraperAdapter {
 
     // Genres
     const genresList: string[] = [];
-    $('div div article div ul li a').each((_, el) => {
+    $(layoutSelector).find('.genres-content a').each((_, el) => {
       const genre = $(el).text().trim().toUpperCase();
       if (genre) genresList.push(genre);
     });
 
     // Cover
-    let coverImage = $('div div article figure img').attr('src') || '';
+    let coverImage = $(layoutSelector).find('.summary_image img').attr('data-src') || $(layoutSelector).find('.summary_image img').attr('src') || '';
     if (coverImage && !coverImage.startsWith('http')) {
       coverImage = this.joinUrl(this.baseUrl, coverImage);
     }
@@ -205,14 +267,13 @@ export class IkigaiAdapter extends BaseScraperAdapter {
     const slug = this.extractSlugFromUrl(url);
 
     // Group scan
-    const groupName = $('div article + div > div h3').text().trim();
-    const groupUrl = $('div article + div > div a').attr('href');
-    let groupCover = $('div article + div > figure img').attr('src');
-    if (groupCover && !groupCover.startsWith('http')) {
-      groupCover = this.joinUrl(this.baseUrl, groupCover);
-    }
+    const groupName = 'Nobledicion Scan';
+
+    // Also look for post-id which madara uses for chapters ajax sometimes
+    const postId = $('#manga-chapters-holder').attr('data-id') || $('link[rel="shortlink"]').attr('href')?.split('=')[1] || '';
 
     return {
+      id: postId,
       slug,
       title,
       description,
@@ -220,115 +281,111 @@ export class IkigaiAdapter extends BaseScraperAdapter {
       type,
       status,
       genres: genresList,
-      groupScan: groupName ? {
+      groupScan: {
         name: groupName,
-        cover: groupCover,
-      } : undefined,
+      },
     };
   }
 
-  private async getChapterList(comicUrl: string): Promise<ChapterListItem[]> {
+  private async getChapterList(comicUrl: string, postId: string): Promise<ChapterListItem[]> {
     const allChapters: ChapterListItem[] = [];
-    let page = 1;
 
-    while (page <= 50) {
-      const pageUrl = comicUrl.includes('?')
-        ? `${comicUrl}&ordenar=asc&pagina=${page}`
-        : `${comicUrl}?ordenar=asc&pagina=${page}`;
+    const ajaxChaptersUrl = `${comicUrl.replace(/\/$/, '')}/ajax/chapters/`;
+    try {
+      this.logger.debug(`Fetching chapters for ${comicUrl} from ${ajaxChaptersUrl} with postId ${postId}`);
+      let html = '';
+      if (postId) {
+          // Standard Madara core uses POST to wp-admin/admin-ajax.php for chapters given a postId
+          const formData = new URLSearchParams();
+          formData.append('action', 'manga_get_chapters');
+          formData.append('manga', postId);
 
-      try {
-        const html = await this.fetchHtml(pageUrl);
-        const $ = cheerio.load(html);
-
-        const pageChapters: ChapterListItem[] = [];
-
-        $('div.w-full > section > ul.grid > li > a').each((_, el) => {
-          const href = $(el).attr('href') || '';
-          if (!href.includes('capitulo')) return;
-
-          const title = $(el).find('h3').first().text().trim();
-          const releaseDateStr = $(el).find('time').attr('datetime') || '';
-
-          let releaseDate: Date | undefined;
-          if (releaseDateStr) {
-            try {
-              releaseDate = new Date(releaseDateStr);
-            } catch {
-              releaseDate = new Date();
-            }
+          const ajaxUrl = `${this.baseUrl}/wp-admin/admin-ajax.php`;
+          const response = await fetch(ajaxUrl, {
+            method: 'POST',
+            body: formData,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+              'Content-Type': 'application/x-www-form-urlencoded',
+              'Referer': comicUrl,
+            },
+          });
+          if (response.ok) {
+              html = await response.text();
           }
+      }
 
-          if (href && title) {
-            pageChapters.push({
-              id: this.extractSlugFromUrl(href),
-              title,
-              number: this.extractChapterNumber(title),
-              url: this.joinUrl(this.baseUrl, href),
-              pathname: href,
-              releaseDate,
-            });
+      // If html is too short or unauthorized, fallback to the direct ajax endpoint some themes use
+      if (!html || html.length < 50 || html.trim() === '0') {
+          const response = await fetch(ajaxChaptersUrl, {
+            method: 'POST',
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+              'Referer': comicUrl,
+            },
+          });
+          if (response.ok) {
+              html = await response.text();
           }
-        });
+      }
 
-        if (pageChapters.length === 0) break;
-        allChapters.push(...pageChapters);
+      if (!html || html.trim() === '0') {
+          // As a last fallback, some madara sites render chapters directly in the html
+          html = await this.fetchHtml(comicUrl);
+      }
 
-        // Check for max page
-        const navLabels: string[] = [];
-        $('section > div > nav > a').each((_, el) => {
-          const label = $(el).attr('aria-label');
-          if (label) navLabels.push(label);
-        });
+      const $ = cheerio.load(html);
 
-        if (navLabels.length > 2) {
-          const lastLabel = navLabels[navLabels.length - 2];
-          const match = lastLabel.match(/Página (\d+)/);
-          if (match && page >= parseInt(match[1])) break;
+      $('.wp-manga-chapter').each((_, el) => {
+        const aTag = $(el).find('a').first();
+        const href = aTag.attr('href') || '';
+        const title = aTag.text().trim();
+        const releaseDateStr = $(el).find('.chapter-release-date i').text().trim();
+
+        let releaseDate: Date | undefined;
+        if (releaseDateStr) {
+            // Note: date format could be "4 febrero, 2026", JS Date parsing might struggle with Spanish months natively
+            // Setting it down to now if it fails, or you can add a Spanish month mapping parser
+            releaseDate = new Date();
         }
 
-        page++;
-        await this.delay(80);
-      } catch (error) {
-        this.logger.error(`Failed to fetch chapter list page ${page}: ${error}`);
-        break;
-      }
+        if (href && title) {
+          allChapters.push({
+            id: this.extractSlugFromUrl(href),
+            title,
+            number: this.extractChapterNumber(title),
+            url: this.joinUrl(this.baseUrl, href),
+            pathname: href,
+            releaseDate,
+          });
+        }
+      });
+
+      await this.delay(80);
+    } catch (error) {
+      this.logger.error(`Failed to fetch chapter list: ${error}`);
     }
 
     return allChapters;
   }
 
   private async scrapeChapter(chapterUrl: string): Promise<ScrapedChapter> {
-    // Add NSFW bypass params
-    let url = chapterUrl;
-    if (!url.includes('forceSetNsfw=true')) {
-      url += url.includes('?') ? '&forceSetNsfw=true' : '?forceSetNsfw=true';
-    }
-    if (!url.includes('forceSetTheme=')) {
-      url += '&forceSetTheme=false';
-    }
-
-    const html = await this.fetchHtml(url);
+    const html = await this.fetchHtml(chapterUrl);
     const $ = cheerio.load(html);
 
-    const chapterName = $('div> div span.line-clamp-1').first().text().trim();
-    const chapterNumText = $('div> div span.line-clamp-1 + span').text().trim();
-    const chapterNumber = parseFloat(chapterNumText.replace(/[^0-9.]/g, '')) || 0;
+    const titleFull = $('#chapter-heading').text().trim() || $('h1').text().trim();
+    const chapterNumber = parseFloat(this.extractChapterNumber(titleFull)) || 0;
 
     const pages: string[] = [];
     const seenUrls = new Set<string>();
 
     // Collect images
-    $('div.w-full .w-full.img img, .img img, .reader img').each((_, el) => {
-      let src = $(el).attr('src') || '';
+    $('.page-break.no-gaps img.wp-manga-chapter-img, .reading-content img').each((_, el) => {
+      let src = $(el).attr('data-src') || $(el).attr('src') || '';
+      src = src.trim();
       if (!src) return;
 
-      if (src.startsWith('https://media.ikigaimangas.cloud')) {
-        // Already full URL
-      } else if (src.startsWith('/series/')) {
-        src = IKIGAI_MEDIA + src;
-      } else {
-        src = this.joinUrl(IKIGAI_MEDIA, src);
-      }
+      src = this.joinUrl(this.baseUrl, src);
 
       if (!seenUrls.has(src)) {
         seenUrls.add(src);
@@ -336,28 +393,18 @@ export class IkigaiAdapter extends BaseScraperAdapter {
       }
     });
 
-    // Fallback selector
-    $('img[src*="media.ikigaimangas.cloud/series"]').each((_, el) => {
-      const src = $(el).attr('src') || '';
-      if (src && !seenUrls.has(src)) {
-        seenUrls.add(src);
-        pages.push(src);
-      }
-    });
-
     return {
       chapterNumber,
-      title: chapterName,
+      title: titleFull,
       slug: this.extractSlugFromUrl(chapterUrl),
       pages,
     };
   }
 
   private async upsertComic(comic: ScrapedComic): Promise<number> {
-    const externalUrl = `${IKIGAI_ORIGIN}/series/${comic.slug}`;
+    const externalUrl = `${this.baseUrl}/manga/${comic.slug}/`;
 
     // First, check if we already have this comic via externalUrl in comicScans
-    // This prevents duplicates when URLs/slugs change
     const existingComicScan = await this.db.query.comicScans.findFirst({
       where: and(
         eq(comicScans.externalUrl, externalUrl),
@@ -438,10 +485,12 @@ export class IkigaiAdapter extends BaseScraperAdapter {
 
     if (existing) return existing.id;
 
+    const externalUrl = `${this.baseUrl}/manga/${comic.slug}/`;
+
     const [created] = await this.db.insert(comicScans).values({
       comicId,
       scanGroupId: this.scanGroupId!,
-      externalUrl: `${IKIGAI_ORIGIN}/series/${comic.slug}`,
+      externalUrl,
       language: 'es',
     }).returning();
 
@@ -494,8 +543,6 @@ export class IkigaiAdapter extends BaseScraperAdapter {
 
     if (!comicScan) return;
 
-    // Search by (comicScanId, chapterNumber) instead of just slug
-    // This prevents duplicates when chapter URLs change
     const existing = await this.db.query.chapters.findFirst({
       where: and(
         eq(chapters.comicScanId, comicScan.id),
@@ -506,7 +553,7 @@ export class IkigaiAdapter extends BaseScraperAdapter {
     if (existing) {
       await this.db.update(chapters).set({
         urlPages: chapter.pages,
-        slug: chapter.slug, // Update slug in case it changed
+        slug: chapter.slug,
         updatedAt: new Date(),
       }).where(eq(chapters.id, existing.id));
     } else {
@@ -524,7 +571,7 @@ export class IkigaiAdapter extends BaseScraperAdapter {
   private async fetchHtml(url: string): Promise<string> {
     const response = await fetch(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Referer': this.baseUrl,
         'Accept': 'text/html,application/xhtml+xml',
       },
@@ -553,6 +600,7 @@ export class IkigaiAdapter extends BaseScraperAdapter {
   private joinUrl(origin: string, path: string): string {
     if (!path) return '';
     if (path.startsWith('http://') || path.startsWith('https://')) return path;
+    if (path.startsWith('//')) return 'https:' + path;
     if (path.startsWith('/')) return origin.replace(/\/$/, '') + path;
     return origin.replace(/\/$/, '') + '/' + path.replace(/^\//, '');
   }

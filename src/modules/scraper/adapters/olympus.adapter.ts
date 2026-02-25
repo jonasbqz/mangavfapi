@@ -317,16 +317,8 @@ export class OlympusAdapter {
     let comicScanId: number;
 
     if (existingComicScan?.comic) {
-      // Comic already exists via externalId (Olympus ID) - update it
+      // Comic already exists via externalId (Olympus ID) - don't overwrite metadata to preserve info, just update timestamp
       await this.db.update(comics).set({
-        title: comic.title,
-        titleAlternative: comic.titleAlternative,
-        slug: comic.slug, // Update slug in case it changed
-        description: comic.description,
-        author: comic.author,
-        coverImage: comic.coverImage,
-        type: comic.type === 'comic' ? 'manga' : comic.type,
-        status: comic.status,
         updatedAt: new Date(),
       }).where(eq(comics.id, existingComicScan.comic.id));
 
@@ -346,16 +338,23 @@ export class OlympusAdapter {
       });
 
       if (existingByTitle) {
-        await this.db.update(comics).set({
-          slug: comic.slug,
-          titleAlternative: comic.titleAlternative,
-          description: comic.description,
-          author: comic.author,
-          coverImage: comic.coverImage,
-          type: comic.type === 'comic' ? 'manga' : comic.type,
-          status: comic.status,
-          updatedAt: new Date(),
-        }).where(eq(comics.id, existingByTitle.id));
+        // Shared comic found by title - conditional description/cover update
+        const updates: any = { updatedAt: new Date() };
+
+        if (comic.description && comic.description.length > (existingByTitle.description?.length || 0)) {
+          updates.description = comic.description;
+        }
+        if (comic.coverImage && existingByTitle.coverImage && comic.coverImage !== existingByTitle.coverImage) {
+          const isFailing = await this.checkImageFailing(existingByTitle.coverImage);
+          if (isFailing) {
+            updates.coverImage = comic.coverImage;
+            this.logger.debug(`Replaced failing cover image for ${comic.title}`);
+          }
+        } else if (comic.coverImage && !existingByTitle.coverImage) {
+          updates.coverImage = comic.coverImage;
+        }
+
+        await this.db.update(comics).set(updates).where(eq(comics.id, existingByTitle.id));
         comicId = existingByTitle.id;
         this.logger.debug(`Found existing comic by title: "${comic.title}" -> Comic #${comicId}`);
       } else {
@@ -487,16 +486,5 @@ export class OlympusAdapter {
     return match ? parseFloat(match[0]) : 0;
   }
 
-  private slugify(text: string): string {
-    return text
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '');
-  }
 
-  private delay(ms?: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms || this.delayMs));
-  }
 }

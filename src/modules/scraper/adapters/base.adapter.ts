@@ -1,5 +1,6 @@
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '@/database/schema';
+import type { ScraperResult } from '../scraper.types';
 
 // Adult genre slugs - used to automatically mark comics as NSFW
 // Note: ecchi and smut are NOT considered adult content
@@ -55,7 +56,7 @@ export abstract class BaseScraperAdapter {
   /**
    * Main scraping method to be implemented by each adapter
    */
-  abstract scrape(): Promise<void>;
+  abstract scrape(...args: any[]): Promise<ScraperResult>;
 
   /**
    * Get the name of this scraper
@@ -102,5 +103,23 @@ export abstract class BaseScraperAdapter {
       .replace(/&quot;/g, '"')
       .replace(/\s+/g, ' ')
       .trim();
+  }
+
+  /**
+   * Check if an image URL is failing (e.g. 404, 403)
+   */
+  protected async checkImageFailing(url: string): Promise<boolean> {
+    if (!url) return true;
+    try {
+      const response = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(5000) });
+      if (response.status === 405) {
+        // Some servers reject HEAD requests, fallback to GET
+        const getRes = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(5000) });
+        return !getRes.ok;
+      }
+      return !response.ok;
+    } catch {
+      return true;
+    }
   }
 }

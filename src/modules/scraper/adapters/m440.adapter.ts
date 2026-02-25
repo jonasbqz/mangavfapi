@@ -452,18 +452,25 @@ export class PeerlessAdapter {
     let comicId: number;
 
     if (existingComicScan && existingComicScan.comic) {
-      await this.db.update(comics).set({
-        title: comic.title,
-        titleAlternative: comic.titleAlternative,
-        description: comic.description,
-        author: comic.author,
-        artist: comic.artist,
-        coverImage: comic.coverImage,
-        type: comic.type === 'comic' ? 'manga' : comic.type,
-        status: comic.status,
-        updatedAt: new Date(),
-      }).where(eq(comics.id, existingComicScan.comicId));
-      comicId = existingComicScan.comicId;
+      // Found via externalUrl - conditional metadata update
+      const existing = existingComicScan.comic;
+      const updates: any = { updatedAt: new Date() };
+
+      if (comic.description && comic.description.length > (existing.description?.length || 0)) {
+        updates.description = comic.description;
+      }
+      if (comic.coverImage && existing.coverImage && comic.coverImage !== existing.coverImage) {
+        const isFailing = await this.checkImageFailing(existing.coverImage);
+        if (isFailing) {
+          updates.coverImage = comic.coverImage;
+          this.logger.debug(`Replaced failing cover image for ${comic.title}`);
+        }
+      } else if (comic.coverImage && !existing.coverImage) {
+        updates.coverImage = comic.coverImage;
+      }
+
+      await this.db.update(comics).set(updates).where(eq(comics.id, existing.id));
+      comicId = existing.id;
       this.logger.debug(`Updated existing comic via comicScan: ${comic.title} (id=${comicId})`);
     } else {
       const existingBySlug = await this.db.query.comics.findFirst({
@@ -471,17 +478,23 @@ export class PeerlessAdapter {
       });
 
       if (existingBySlug) {
-        await this.db.update(comics).set({
-          title: comic.title,
-          titleAlternative: comic.titleAlternative,
-          description: comic.description,
-          author: comic.author,
-          artist: comic.artist,
-          coverImage: comic.coverImage,
-          type: comic.type === 'comic' ? 'manga' : comic.type,
-          status: comic.status,
-          updatedAt: new Date(),
-        }).where(eq(comics.id, existingBySlug.id));
+        // Shared comic found by slug - conditional update
+        const updates: any = { updatedAt: new Date() };
+
+        if (comic.description && comic.description.length > (existingBySlug.description?.length || 0)) {
+          updates.description = comic.description;
+        }
+        if (comic.coverImage && existingBySlug.coverImage && comic.coverImage !== existingBySlug.coverImage) {
+          const isFailing = await this.checkImageFailing(existingBySlug.coverImage);
+          if (isFailing) {
+            updates.coverImage = comic.coverImage;
+            this.logger.debug(`Replaced failing cover image for ${comic.title}`);
+          }
+        } else if (comic.coverImage && !existingBySlug.coverImage) {
+          updates.coverImage = comic.coverImage;
+        }
+
+        await this.db.update(comics).set(updates).where(eq(comics.id, existingBySlug.id));
         comicId = existingBySlug.id;
         this.logger.debug(`Updated existing comic via slug: ${comic.title} (id=${comicId})`);
       } else {

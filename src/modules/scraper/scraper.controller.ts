@@ -19,24 +19,28 @@ export class ScraperController {
 
   @Post('trigger')
   @ApiOperation({ summary: 'Manually trigger a scraper' })
-  @ApiQuery({ name: 'name', required: true, type: String, enum: ['olympus', 'ikigai', 'peerless'] })
+  @ApiQuery({ name: 'name', required: true, type: String, enum: ['olympus', 'ikigai', 'peerless', 'nobledicion'] })
   @ApiQuery({ name: 'startPage', required: false, type: Number, description: 'Start page (default: 1)' })
-  @ApiQuery({ name: 'endPage', required: false, type: Number, description: 'End page (default: 5 for olympus, 10 for ikigai/peerless)' })
+  @ApiQuery({ name: 'endPage', required: false, type: Number, description: 'End page (default for nobledicion: 3)' })
+  @ApiQuery({ name: 'postsPerPage', required: false, type: Number, description: 'Posts per page (for nobledicion, default 18)' })
   @ApiResponse({ status: 200, description: 'Scraper completed' })
   @ApiResponse({ status: 409, description: 'That scraper is already running' })
   async trigger(
     @Query('name') name: string,
     @Query('startPage') startPage?: string,
     @Query('endPage') endPage?: string,
+    @Query('postsPerPage') postsPerPage?: string,
   ) {
-    const start = startPage ? parseInt(startPage, 10) : 1;
-    const end = endPage ? parseInt(endPage, 10) : (name === 'olympus' ? 5 : 10);
+    const start = startPage ? parseInt(startPage, 10) : (name === 'nobledicion' ? 0 : 1);
+    const end = endPage ? parseInt(endPage, 10) : (name === 'olympus' ? 5 : (name === 'nobledicion' ? 3 : 10));
+    const ppp = postsPerPage ? parseInt(postsPerPage, 10) : (name === 'nobledicion' ? 18 : undefined);
 
     console.log(`[ScraperController] Triggering ${name} scraper: pages ${start}-${end}`);
 
     const result = await this.scraperService.triggerScraper(name, {
       startPage: start,
       endPage: end,
+      postsPerPage: ppp,
     });
 
     const success = result.errors.length === 0 && (result.comics > 0 || result.chapters > 0);

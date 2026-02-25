@@ -8,6 +8,7 @@ import { ScraperQueue } from './scraper.queue';
 import { OlympusAdapter } from './adapters/olympus.adapter';
 import { IkigaiAdapter } from './adapters/ikigai.adapter';
 import { PeerlessAdapter } from './adapters/m440.adapter';
+import { NobledicionAdapter } from './adapters/nobledicion.adapter';
 import type { ScraperResult } from './scraper.types';
 
 @Injectable()
@@ -27,9 +28,11 @@ export class ScraperService implements OnModuleInit {
   async onModuleInit() {
     this.logger.log('Server started. Triggering initial scrape tasks...');
 
-    this.scrapeIkigai(1, 5).catch(err => this.logger.error(`Initial Ikigai scrape failed: ${err}`));
-    this.scrapeOlympus(1, 3).catch(err => this.logger.error(`Initial Olympus scrape failed: ${err}`));
+    // this.scrapeIkigai(1, 5).catch(err => this.logger.error(`Initial Ikigai scrape failed: ${err}`));
+    // this.scrapeOlympus(1, 3).catch(err => this.logger.error(`Initial Olympus scrape failed: ${err}`));
     // this.scrapePeerless(1,2).catch(err => this.logger.error(`Initial Peerless scrape failed: ${err}`));
+    // Initial Nobledicion scrape config for pages 0-3 with 18 items per page:
+    this.scrapeNobledicion(0, 0, 6).catch(err => this.logger.error(`Initial Nobledicion scrape failed: ${err}`));
   }
 
   getStatus() {
@@ -43,7 +46,7 @@ export class ScraperService implements OnModuleInit {
     return this.queue.forceReset();
   }
 
-  async triggerScraper(scraperName: string, options?: { startPage?: number; endPage?: number }) {
+  async triggerScraper(scraperName: string, options?: { startPage?: number; endPage?: number; postsPerPage?: number }) {
     if (this.queue.isRunning(scraperName)) {
       throw new ConflictException(
         `Scraper "${scraperName}" is already running.`,
@@ -57,6 +60,8 @@ export class ScraperService implements OnModuleInit {
         return this.scrapeIkigai(options?.startPage, options?.endPage);
       case 'peerless':
         return this.scrapePeerless(options?.startPage, options?.endPage);
+      case 'nobledicion':
+        return this.scrapeNobledicion(options?.startPage, options?.endPage, options?.postsPerPage);
       default:
         throw new Error(`Unknown scraper: ${scraperName}`);
     }
@@ -92,6 +97,17 @@ export class ScraperService implements OnModuleInit {
     if (!this.queue.isRunning('peerless')) {
       this.logger.log('Starting scheduled Peerless scrape');
       await this.scrapePeerless(1, 1);
+    }
+  }
+
+  /**
+   * Scheduled scraping - Nobledicion every 5 hours
+   */
+  @Cron('0 */5 * * *')
+  async scheduledNobledicion() {
+    if (!this.queue.isRunning('nobledicion')) {
+      this.logger.log('Starting scheduled Nobledicion scrape');
+      await this.scrapeNobledicion(0, 0, 6);
     }
   }
 
@@ -136,6 +152,22 @@ export class ScraperService implements OnModuleInit {
 
       this.logger.log(
         `Peerless scrape completed: ${result.comics} comics, ${result.chapters} chapters, ${result.errors.length} errors`,
+      );
+
+      return result;
+    });
+  }
+
+  private async scrapeNobledicion(startPage = 0, endPage = 3, postsPerPage = 18): Promise<ScraperResult> {
+    return this.queue.enqueue('nobledicion', async () => {
+      this.logger.log(`Scraping Nobledicion pages ${startPage}-${endPage} (${postsPerPage} posts/page)...`);
+
+      const baseUrl = this.configService.get<string>('SCRAPER_NOBLEDICION_URL');
+      const adapter = new NobledicionAdapter(this.db, this.delayMs, baseUrl);
+      const result = await adapter.scrape(startPage, endPage, postsPerPage);
+
+      this.logger.log(
+        `Nobledicion scrape completed: ${result.comics} comics, ${result.chapters} chapters, ${result.errors.length} errors`,
       );
 
       return result;
