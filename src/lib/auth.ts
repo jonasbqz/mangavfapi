@@ -44,7 +44,8 @@ export const auth = betterAuth({
     ...(process.env.CORS_ORIGIN?.split(',') || ['http://localhost:3000', 'https://mangolibreria.com']),
     'https://mangolibreria.com',
     'https://api.mangolibreria.com',
-    'https://www.mangolibreria.com'
+    'https://www.mangolibreria.com',
+    'https://api.mangasx.online',
   ],
   advanced: {
     crossSubDomainCookies: {
