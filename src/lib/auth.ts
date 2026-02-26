@@ -41,7 +41,7 @@ export const auth = betterAuth({
     },
   },
   trustedOrigins: [
-    ...(process.env.CORS_ORIGIN?.split(',') || ['http://localhost:3000']),
+    ...(process.env.CORS_ORIGIN?.split(',') || ['http://localhost:3000', 'https://mangolibreria.com']),
     'https://mangolibreria.com',
     'https://api.mangolibreria.com',
     'https://www.mangolibreria.com'
