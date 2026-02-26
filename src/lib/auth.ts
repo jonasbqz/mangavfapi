@@ -50,7 +50,7 @@ export const auth = betterAuth({
   advanced: {
     crossSubDomainCookies: {
       enabled: true,
-      domain: process.env.NODE_ENV === 'production' ? '.mangolibreria.com' : undefined,
+      domain: process.env.NODE_ENV === 'production' ? '.mangasx.online' : undefined,
     },
     defaultCookieAttributes: {
       secure: process.env.NODE_ENV === 'production',

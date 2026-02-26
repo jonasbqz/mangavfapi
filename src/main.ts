@@ -58,7 +58,7 @@ async function bootstrap() {
   });
 
   app.enableCors({
-    origin: process.env.CORS_ORIGIN?.split(',') || ['https://mangolibreria.com', 'http://localhost:3000'],
+    origin: process.env.CORS_ORIGIN?.split(',') || ['https://mangolibreria.com', 'http://localhost:3000','https://api.mangasx.online'],
     credentials: true,
   });
 
