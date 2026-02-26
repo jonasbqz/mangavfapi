@@ -16,6 +16,7 @@ import { CommentsModule } from './modules/comments/comments.module';
 import { PlaylistsModule } from './modules/playlists/playlists.module';
 import { DownloadsModule } from './modules/downloads/downloads.module';
 import { PaymentModule } from './modules/payment/payment.module';
+import { EngagementModule } from './modules/engagement/engagement.module';
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -38,6 +39,7 @@ import { PaymentModule } from './modules/payment/payment.module';
     PlaylistsModule,
     DownloadsModule,
     PaymentModule,
+    EngagementModule,
   ],
 })
 export class AppModule {}
