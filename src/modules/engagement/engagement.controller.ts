@@ -2,7 +2,7 @@ import { Controller, Get, Header } from '@nestjs/common';
 
 @Controller('o')
 export class EngagementController {
-  @Get('lp')
+  @Get('pl')
   @Header('Content-Type', 'application/javascript; charset=utf-8')
   @Header('Cache-Control', 'public, max-age=3600')
   getEngagementScript() {
