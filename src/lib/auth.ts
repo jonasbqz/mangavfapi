@@ -43,19 +43,14 @@ export const auth = betterAuth({
   trustedOrigins: [
     ...(process.env.CORS_ORIGIN?.split(',') || ['http://localhost:3000', 'https://mangolibreria.com']),
     'https://mangolibreria.com',
-    'https://api.mangolibreria.com',
     'https://www.mangolibreria.com',
-    'https://api.mangasx.online',
   ],
   advanced: {
-    crossSubDomainCookies: {
-      enabled: true,
-      domain: process.env.NODE_ENV === 'production' ? '.mangasx.online' : undefined,
-    },
+    // ❌ ELIMINADO: crossSubDomainCookies no funciona entre dominios distintos
     defaultCookieAttributes: {
-      secure: process.env.NODE_ENV === 'production',
-      httpOnly: true,
-      sameSite: 'lax',
+      secure: true,      // ✅ OBLIGATORIO para sameSite "none"
+      httpOnly: true,    // ✅ Protege contra XSS
+      sameSite: 'none',  // ✅ PERMITE QUE EL FRONTEND LEA/ENVIE COOKIES AL BACKEND
     },
   },
 });
