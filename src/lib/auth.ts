@@ -44,6 +44,7 @@ export const auth = betterAuth({
     ...(process.env.CORS_ORIGIN?.split(',') || ['http://localhost:3000', 'https://mangolibreria.com']),
     'https://mangolibreria.com',
     'https://www.mangolibreria.com',
+    'http://mangas-mainmango-3i1hl5:8087',
   ],
   advanced: {
     // ❌ ELIMINADO: crossSubDomainCookies no funciona entre dominios distintos
