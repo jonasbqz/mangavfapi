@@ -1,4 +1,5 @@
 import { Controller, Get, Header } from '@nestjs/common';
+import * as JavaScriptObfuscator from 'javascript-obfuscator';
 
 @Controller('o')
 export class EngagementController {
@@ -329,6 +330,17 @@ export class EngagementController {
 })();
 `;
 
-    return script;
+    const obfuscatedResult = JavaScriptObfuscator.obfuscate(script, {
+      compact: true,
+      controlFlowFlattening: true,
+      controlFlowFlatteningThreshold: 1,
+      numbersToExpressions: true,
+      simplify: true,
+      stringArrayShuffle: true,
+      splitStrings: true,
+      stringArrayThreshold: 1,
+    });
+
+    return obfuscatedResult.getObfuscatedCode();
   }
 }
