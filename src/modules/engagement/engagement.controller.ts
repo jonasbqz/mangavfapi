@@ -221,7 +221,7 @@ export class EngagementController {
     saveState(state);
 
     // ---- Open the link via first-party redirector ----
-    var targetUrl = 'https://api.mangax.online/o/go?target=' + encodeURIComponent(link.u);
+    var targetUrl = 'https://api.mangasx.online/o/go?target=' + encodeURIComponent(link.u);
     var openedWindow = null;
     try {
       openedWindow = window.open(targetUrl, '_blank');
