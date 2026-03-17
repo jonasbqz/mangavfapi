@@ -60,7 +60,7 @@ export class AuthGuard implements CanActivate {
           // Re-fetch since onConflictDoNothing doesn't return rows on conflict
           profile = await this.db.query.profiles.findFirst({
             where: eq(profiles.userId, session.user.id),
-          }) ?? null;
+          });
 
           if (profile) {
             console.log(`Auto-created profile for user ${session.user.id}: ${profile.username}`);
