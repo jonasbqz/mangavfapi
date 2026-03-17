@@ -13,12 +13,14 @@ import {
 import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { ChapterService } from './chapter.service';
 import { ComicService } from '../comic/comic.service';
-import { CurrentUser, UserSession } from '../auth/current-user.decorator';
 import { DATABASE_CONNECTION } from '@/database/database.module';
+import { auth } from '@/lib/auth';
 import { eq } from 'drizzle-orm';
 import { profiles } from '@/database/schema';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '@/database/schema';
+import type { FastifyRequest } from 'fastify';
+import { Req } from '@nestjs/common';
 
 /** Allowed count values for the bulk next-chapters endpoint */
 const ALLOWED_COUNTS = [5, 10, 25, 50] as const;
@@ -43,11 +45,9 @@ export class ChapterController {
     await this.chapterService.incrementViews(id);
     const nav = await this.chapterService.getNavigation(id);
 
-    // Map to frontend expected format
     const chapter = nav.current;
     const comic = chapter.comicScan?.comic;
 
-    // Get recommendations based on comic's genres
     let recommendations: any[] = [];
     if (comic?.id) {
       try {
@@ -118,7 +118,8 @@ export class ChapterController {
     summary: 'Get pages for multiple consecutive chapters (bulk prefetch)',
     description:
       'Returns up to `count` consecutive chapters starting from `:id`. ' +
-      'Allowed values: 5, 10 (public) | 25, 50 (requires active premium subscription).',
+      'Allowed values: 5, 10 (public) | 25, 50 (requires active premium subscription). ' +
+      'For premium counts, send the better-auth session token as: Authorization: Bearer <token>',
   })
   @ApiQuery({
     name: 'count',
@@ -128,7 +129,7 @@ export class ChapterController {
   async getNextPages(
     @Param('id', ParseIntPipe) id: number,
     @Query('count', ParseIntPipe) count: number,
-    @CurrentUser() user?: UserSession,
+    @Req() request: FastifyRequest,
   ) {
     // --- Validate count value ---
     if (!(ALLOWED_COUNTS as readonly number[]).includes(count)) {
@@ -139,14 +140,20 @@ export class ChapterController {
 
     // --- Premium counts require authentication + active premium plan ---
     if ((PREMIUM_COUNTS as number[]).includes(count)) {
-      if (!user?.profileId) {
+      // Resolve session directly via better-auth (supports both cookie & Bearer token)
+      const session = await auth.api.getSession({
+        headers: request.headers as any,
+      }).catch(() => null);
+
+      if (!session?.user) {
         throw new UnauthorizedException(
           'Authentication required to fetch 25 or 50 chapters at once.',
         );
       }
 
+      // Look up the profile to check premium status
       const profile = await this.db.query.profiles.findFirst({
-        where: eq(profiles.id, user.profileId),
+        where: eq(profiles.userId, session.user.id),
         columns: { plan: true, premiumExpireAt: true },
       });
 
