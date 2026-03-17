@@ -1,5 +1,7 @@
+import 'dotenv/config';
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import { bearer } from 'better-auth/plugins/bearer';
 import { Pool } from 'pg';
 import * as schema from '@/database/schema';
 import { drizzle } from 'drizzle-orm/node-postgres';
@@ -54,6 +56,7 @@ export const auth = betterAuth({
       sameSite: 'none',  // ✅ PERMITE QUE EL FRONTEND LEA/ENVIE COOKIES AL BACKEND
     },
   },
+  plugins: [bearer()],
 });
 
 export type Session = typeof auth.$Infer.Session;
