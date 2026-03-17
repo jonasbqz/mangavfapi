@@ -6,9 +6,12 @@ import {
   Query,
   ParseIntPipe,
   NotFoundException,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags, ApiQuery, ApiResponse } from '@nestjs/swagger';
 import { ComicService, ComicFilters } from './comic.service';
+import { AuthGuard } from '@/modules/auth/auth.guard';
+import { AdminGuard } from '@/modules/auth/admin.guard';
 
 @ApiTags('Comics')
 @Controller('comics')
@@ -139,6 +142,7 @@ export class ComicController {
   }
 
   @Post('admin/clear-cache')
+  @UseGuards(AuthGuard, AdminGuard)
   @ApiOperation({ summary: 'Clear all comic-related caches' })
   @ApiResponse({ status: 200, description: 'Cache cleared successfully' })
   async clearCache() {

@@ -1,10 +1,13 @@
-import { Controller, Get, Post, Query, Delete } from '@nestjs/common';
+import { Controller, Get, Post, Query, Delete, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags, ApiQuery, ApiResponse } from '@nestjs/swagger';
 import { ScraperService } from './scraper.service';
 import { ScraperQueue } from './scraper.queue';
+import { AuthGuard } from '@/modules/auth/auth.guard';
+import { AdminGuard } from '@/modules/auth/admin.guard';
 
 @ApiTags('Scraper')
 @Controller('scraper')
+@UseGuards(AuthGuard, AdminGuard)
 export class ScraperController {
   constructor(
     private scraperService: ScraperService,

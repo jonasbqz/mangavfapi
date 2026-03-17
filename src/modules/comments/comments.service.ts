@@ -6,6 +6,13 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '@/database/schema';
 import { CreateCommentDto, UpdateCommentDto } from './comments.dto';
 
+const publicProfileColumns = {
+  id: true,
+  username: true,
+  visibleName: true,
+  avatarUrl: true,
+} as const;
+
 @Injectable()
 export class CommentsService {
   constructor(
@@ -30,13 +37,7 @@ export class CommentsService {
       where: eq(comments.id, id),
       with: {
         profile: {
-          columns: {
-            id: true,
-            userId: true,
-            username: true,
-            visibleName: true,
-            avatarUrl: true,
-          },
+          columns: publicProfileColumns,
         },
       },
     });
@@ -55,26 +56,14 @@ export class CommentsService {
       offset,
       with: {
         profile: {
-          columns: {
-            id: true,
-            userId: true,
-            username: true,
-            visibleName: true,
-            avatarUrl: true,
-          },
+          columns: publicProfileColumns,
         },
         replies: {
           orderBy: [desc(comments.createdAt)],
           limit: 5,
           with: {
             profile: {
-              columns: {
-                id: true,
-                userId: true,
-                username: true,
-                visibleName: true,
-                avatarUrl: true,
-              },
+              columns: publicProfileColumns,
             },
           },
         },
@@ -95,26 +84,14 @@ export class CommentsService {
       offset,
       with: {
         profile: {
-          columns: {
-            id: true,
-            userId: true,
-            username: true,
-            visibleName: true,
-            avatarUrl: true,
-          },
+          columns: publicProfileColumns,
         },
         replies: {
           orderBy: [desc(comments.createdAt)],
           limit: 5,
           with: {
             profile: {
-              columns: {
-                id: true,
-                userId: true,
-                username: true,
-                visibleName: true,
-                avatarUrl: true,
-              },
+              columns: publicProfileColumns,
             },
           },
         },
@@ -132,13 +109,7 @@ export class CommentsService {
       offset,
       with: {
         profile: {
-          columns: {
-            id: true,
-            userId: true,
-            username: true,
-            visibleName: true,
-            avatarUrl: true,
-          },
+          columns: publicProfileColumns,
         },
       },
     });

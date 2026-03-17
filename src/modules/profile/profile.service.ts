@@ -62,6 +62,23 @@ export class ProfileService {
     });
   }
 
+  toPrivateProfileResponse(profile: typeof profiles.$inferSelect) {
+    return {
+      id: profile.id,
+      username: profile.username,
+      visibleName: profile.visibleName,
+      bio: profile.bio,
+      avatarUrl: profile.avatarUrl,
+      language: profile.language,
+      dateOfBirth: profile.dateOfBirth,
+      isAdultContent: profile.isAdultContent,
+      plan: profile.plan,
+      premiumExpireAt: profile.premiumExpireAt,
+      createdAt: profile.createdAt,
+      updatedAt: profile.updatedAt,
+    };
+  }
+
   async update(profileId: string, dto: UpdateProfileDto) {
     const profile = await this.findById(profileId);
     if (!profile) {

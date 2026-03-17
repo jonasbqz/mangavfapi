@@ -9,6 +9,7 @@ import {
   Query,
   UseGuards,
   NotFoundException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '@/modules/auth/auth.guard';
@@ -115,11 +116,18 @@ export class ProfileController {
   @UseGuards(AuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Search profile by user_id' })
-  async getByUserId(@Query('user_id') userId: string) {
-    const profile = await this.profileService.findByUserId(userId);
+  async getByUserId(
+    @CurrentUser() user: UserSession,
+    @Query('user_id') userId: string,
+  ) {
+    if (userId && userId !== user.userId) {
+      throw new ForbiddenException('You can only access your own profile by user_id');
+    }
+
+    const profile = await this.profileService.findByUserId(userId || user.userId);
     if (!profile) {
       throw new NotFoundException('Profile not found');
     }
-    return profile;
+    return this.profileService.toPrivateProfileResponse(profile);
   }
 }
