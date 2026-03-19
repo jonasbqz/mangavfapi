@@ -31,20 +31,9 @@ export class JwtDownloadController {
       'Authenticated users get a token with their plan. Anonymous users get a free-tier token valid for 10 minutes.',
   })
   async generateDownloadToken(@Req() request: FastifyRequest) {
-    // Convertir las cabeceras de Fastify a un objeto Headers web estándar
-    // requerido por better-auth para no fallar silenciosamente.
-    const headers = new Headers();
-    Object.entries(request.headers).forEach(([key, value]) => {
-      if (typeof value === 'string') {
-        headers.append(key, value);
-      } else if (Array.isArray(value)) {
-        value.forEach((v) => headers.append(key, v));
-      }
-    });
-
-    // Intentar obtener sesión (manejando el error sin ocultarlo por completo)
+    // Usar directamente las cabeceras de Fastify de la misma forma que lo hace el AuthGuard
     const session = await auth.api
-      .getSession({ headers: headers as any })
+      .getSession({ headers: request.headers as any })
       .catch((err) => {
         console.error('[jwt-download] Error getSession:', err);
         return null;
