@@ -17,6 +17,7 @@ import { PlaylistsModule } from './modules/playlists/playlists.module';
 import { DownloadsModule } from './modules/downloads/downloads.module';
 import { PaymentModule } from './modules/payment/payment.module';
 import { EngagementModule } from './modules/engagement/engagement.module';
+import { JwtDownloadModule } from './modules/jwt-download/jwt-download.module';
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -40,6 +41,7 @@ import { EngagementModule } from './modules/engagement/engagement.module';
     DownloadsModule,
     PaymentModule,
     EngagementModule,
+    JwtDownloadModule,
   ],
 })
 export class AppModule {}
