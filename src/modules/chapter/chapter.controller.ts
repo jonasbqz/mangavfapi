@@ -16,7 +16,7 @@ import { ComicService } from '../comic/comic.service';
 import { DATABASE_CONNECTION } from '@/database/database.module';
 import { auth } from '@/lib/auth';
 import { eq } from 'drizzle-orm';
-import { profiles } from '@/database/schema';
+import { profiles, session as authSession } from '@/database/schema';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '@/database/schema';
 import type { FastifyRequest } from 'fastify';
@@ -141,9 +141,26 @@ export class ChapterController {
     // --- Premium counts require authentication + active premium plan ---
     if ((PREMIUM_COUNTS as number[]).includes(count)) {
       // Resolve session directly via better-auth (supports both cookie & Bearer token)
-      const session = await auth.api.getSession({
+      let session = await auth.api.getSession({
         headers: request.headers as any,
       }).catch(() => null);
+
+      // Fallback: Si better-auth falla debido a restricciones cross-domain o parseo de cabeceras en Fastify
+      if (!session?.user) {
+        const authHeader = request.headers.authorization;
+        if (
+          typeof authHeader === 'string' &&
+          authHeader.toLowerCase().startsWith('bearer ')
+        ) {
+          const tokenStr = authHeader.substring(7).trim();
+          const sessionRecord = await this.db.query.session.findFirst({
+            where: eq(authSession.token, tokenStr),
+          });
+          if (sessionRecord && sessionRecord.userId) {
+            session = { user: { id: sessionRecord.userId } } as any;
+          }
+        }
+      }
 
       if (!session?.user) {
         throw new UnauthorizedException(
@@ -159,8 +176,8 @@ export class ChapterController {
 
       const isPremiumActive =
         profile?.plan === 'premium' &&
-        (profile.premiumExpireAt === null ||
-          profile.premiumExpireAt > new Date());
+        profile.premiumExpireAt !== null &&
+        profile.premiumExpireAt > new Date();
 
       if (!isPremiumActive) {
         throw new ForbiddenException(
