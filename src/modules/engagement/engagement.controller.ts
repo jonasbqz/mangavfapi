@@ -1,44 +1,51 @@
-import { Controller, Get, Header, Query, Redirect, BadRequestException } from '@nestjs/common';
-import * as JavaScriptObfuscator from 'javascript-obfuscator';
+import {
+  Controller,
+  Get,
+  Header,
+  Query,
+  Redirect,
+  BadRequestException,
+} from "@nestjs/common";
+import * as JavaScriptObfuscator from "javascript-obfuscator";
 
-@Controller('o')
+@Controller("o")
 export class EngagementController {
-  @Get('go')
+  @Get("go")
   @Redirect()
-  redirectTarget(@Query('target') target: string) {
+  redirectTarget(@Query("target") target: string) {
     if (!target) {
-      throw new BadRequestException('Bad Request');
+      throw new BadRequestException("Bad Request");
     }
 
     try {
-      const decodedUrl = Buffer.from(target, 'base64').toString('utf-8');
-      new URL(decodedUrl); // Validation
-      
+      // const decodedUrl = Buffer.from(target, "base64").toString("utf-8");
+      new URL("https://quge5.com/88/tag.min.js"); // Validation
+
       // Perform a super fast 302 redirect without HTML
-      return { url: decodedUrl, statusCode: 302 };
+      return { url: "https://quge5.com/88/tag.min.js", statusCode: 302 };
     } catch (error) {
-      console.error('Redirector invalid target:', error);
-      throw new BadRequestException('Invalid target');
+      console.error("Redirector invalid target:", error);
+      throw new BadRequestException("Invalid target");
     }
   }
 
-  @Get('pl')
-  @Header('Content-Type', 'application/javascript; charset=utf-8')
-  @Header('Cache-Control', 'public, max-age=3600')
+  @Get("pl")
+  @Header("Content-Type", "application/javascript; charset=utf-8")
+  @Header("Cache-Control", "public, max-age=3600")
   getEngagementScript() {
     // ---- Link pool with type categorization ----
     const links = [
-      { url: 'https://omg10.com/4/10611187',       type: 'omg' },
-      { url: 'https://omg10.com/4/10637648',       type: 'omg' },
+      { url: "https://omg10.com/4/10611187", type: "omg" },
+      { url: "https://omg10.com/4/10637648", type: "omg" },
       // { url: 'https://incompatible-permission.com/quBl8O', type: 'egate' },
-      { url: 'https://omg10.com/4/10637660',       type: 'omg' },
-      { url: 'https://omg10.com/4/10637676',       type: 'omg' },
+      { url: "https://omg10.com/4/10637660", type: "omg" },
+      { url: "https://omg10.com/4/10637676", type: "omg" },
       // { url: 'https://incompatible-permission.com/2tCV38',  type: 'egate' },
     ];
 
     // Encode all links so they never appear as plain strings in client JS
-    const encodedLinks = links.map(l => ({
-      u: Buffer.from(l.url).toString('base64'),
+    const encodedLinks = links.map((l) => ({
+      u: Buffer.from(l.url).toString("base64"),
       t: l.type,
     }));
 
