@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { SignJWT } from "jose";
+import { SignJWT, jwtVerify } from "jose";
 import { randomBytes } from "crypto";
 import { getRedisRaw } from "@/lib/redis-raw";
 
@@ -71,5 +71,13 @@ export class JwtDownloadService {
       .sign(secret);
 
     return token;
+  }
+
+  async verifyToken(token: string): Promise<DownloadTokenPayload> {
+    const secret = await this.getOrCreateSecret();
+    const { payload } = await jwtVerify(token, secret, {
+      algorithms: ["HS256"],
+    });
+    return payload as unknown as DownloadTokenPayload;
   }
 }

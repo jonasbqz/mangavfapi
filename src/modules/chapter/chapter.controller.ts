@@ -21,6 +21,7 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '@/database/schema';
 import type { FastifyRequest } from 'fastify';
 import { Req } from '@nestjs/common';
+import { JwtDownloadService } from '../jwt-download/jwt-download.service';
 
 /** Allowed count values for the bulk next-chapters endpoint */
 const ALLOWED_COUNTS = [5, 10, 25, 50] as const;
@@ -37,6 +38,7 @@ export class ChapterController {
     private comicService: ComicService,
     @Inject(DATABASE_CONNECTION)
     private db: NodePgDatabase<typeof schema>,
+    private jwtDownloadService: JwtDownloadService,
   ) {}
 
   @Get(':id')
@@ -130,6 +132,7 @@ export class ChapterController {
     @Param('id', ParseIntPipe) id: number,
     @Query('count', ParseIntPipe) count: number,
     @Req() request: FastifyRequest,
+    @Query('jwtToken') jwtToken?: string,
   ) {
     // --- Validate count value ---
     if (!(ALLOWED_COUNTS as readonly number[]).includes(count)) {
@@ -140,44 +143,61 @@ export class ChapterController {
 
     // --- Premium counts require authentication + active premium plan ---
     if ((PREMIUM_COUNTS as number[]).includes(count)) {
-      // Resolve session directly via better-auth (supports both cookie & Bearer token)
-      let session = await auth.api.getSession({
-        headers: request.headers as any,
-      }).catch(() => null);
+      let isPremiumActive = false;
 
-      // Fallback: Si better-auth falla debido a restricciones cross-domain o parseo de cabeceras en Fastify
-      if (!session?.user) {
-        const authHeader = request.headers.authorization;
-        if (
-          typeof authHeader === 'string' &&
-          authHeader.toLowerCase().startsWith('bearer ')
-        ) {
-          const tokenStr = authHeader.substring(7).trim();
-          const sessionRecord = await this.db.query.session.findFirst({
-            where: eq(authSession.token, tokenStr),
-          });
-          if (sessionRecord && sessionRecord.userId) {
-            session = { user: { id: sessionRecord.userId } } as any;
+      // 1. Try to verify via jwtToken query parameter (from mango-download proxy)
+      if (jwtToken) {
+        try {
+          const payload = await this.jwtDownloadService.verifyToken(jwtToken);
+          if (payload.isPremium) {
+            isPremiumActive = true;
           }
+        } catch (err) {
+          // Token invalid or expired, fallback to session check
         }
       }
 
-      if (!session?.user) {
-        throw new UnauthorizedException(
-          'Authentication required to fetch 25 or 50 chapters at once.',
-        );
+      // 2. Fallback to session check if JWT was invalid, absent, or not premium
+      if (!isPremiumActive) {
+        // Resolve session directly via better-auth (supports both cookie & Bearer token)
+        let session = await auth.api.getSession({
+          headers: request.headers as any,
+        }).catch(() => null);
+
+        // Fallback: Si better-auth falla debido a restricciones cross-domain o parseo de cabeceras en Fastify
+        if (!session?.user) {
+          const authHeader = request.headers.authorization;
+          if (
+            typeof authHeader === 'string' &&
+            authHeader.toLowerCase().startsWith('bearer ')
+          ) {
+            const tokenStr = authHeader.substring(7).trim();
+            const sessionRecord = await this.db.query.session.findFirst({
+              where: eq(authSession.token, tokenStr),
+            });
+            if (sessionRecord && sessionRecord.userId) {
+              session = { user: { id: sessionRecord.userId } } as any;
+            }
+          }
+        }
+
+        if (!session?.user) {
+          throw new UnauthorizedException(
+            'Authentication required to fetch 25 or 50 chapters at once.',
+          );
+        }
+
+        // Look up the profile to check premium status
+        const profile = await this.db.query.profiles.findFirst({
+          where: eq(profiles.userId, session.user.id),
+          columns: { plan: true, premiumExpireAt: true },
+        });
+
+        isPremiumActive =
+          profile?.plan === 'premium' &&
+          profile.premiumExpireAt !== null &&
+          profile.premiumExpireAt > new Date();
       }
-
-      // Look up the profile to check premium status
-      const profile = await this.db.query.profiles.findFirst({
-        where: eq(profiles.userId, session.user.id),
-        columns: { plan: true, premiumExpireAt: true },
-      });
-
-      const isPremiumActive =
-        profile?.plan === 'premium' &&
-        profile.premiumExpireAt !== null &&
-        profile.premiumExpireAt > new Date();
 
       if (!isPremiumActive) {
         throw new ForbiddenException(
