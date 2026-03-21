@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, foreignKey, uniqueIndex, index, uuid, integer, boolean, varchar, unique, real, jsonb, date, pgEnum } from "drizzle-orm/pg-core"
+import { pgTable, text, timestamp, foreignKey, uniqueIndex, index, uuid, integer, boolean, varchar, unique, real, jsonb, date, pgEnum, customType } from "drizzle-orm/pg-core"
   import { sql } from "drizzle-orm"
 
 export const bookmarkStatus = pgEnum("bookmark_status", ['reading', 'completed', 'dropped', 'plan_to_read'])
@@ -9,6 +9,12 @@ export const premiumCycle = pgEnum("premium_cycle", ['1m', '3m', '6m', '1w'])
 export const userPlan = pgEnum("user_plan", ['basic', 'premium'])
 
 
+
+const tsvector = customType<{ data: string }>({
+  dataType() {
+    return 'tsvector';
+  },
+});
 
 export const verification = pgTable("verification", {
 	id: text("id").primaryKey().notNull(),
@@ -345,7 +351,7 @@ export const comics = pgTable("comics", {
 	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow(),
 	isHentai: boolean("is_hentai").default(false),
 	// TODO: failed to parse database type 'tsvector'
-	searchVector: unknown("search_vector"),
+	searchVector: tsvector("search_vector"),
 },
 (table) => {
 	return {
