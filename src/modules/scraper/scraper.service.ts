@@ -34,7 +34,7 @@ export class ScraperService implements OnModuleInit {
   async onModuleInit() {
     this.logger.log("Server started. Triggering initial scrape tasks...");
 
-    this.scrapeIkigai(60, 100).catch((err) =>
+    this.scrapeIkigai(60, 200).catch((err) =>
       this.logger.error(`Initial Ikigai scrape failed: ${err}`),
     );
     this.scrapeOlympus(10, 30).catch((err) =>
