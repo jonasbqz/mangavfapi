@@ -18,6 +18,7 @@ import { DownloadsModule } from './modules/downloads/downloads.module';
 import { PaymentModule } from './modules/payment/payment.module';
 import { EngagementModule } from './modules/engagement/engagement.module';
 import { JwtDownloadModule } from './modules/jwt-download/jwt-download.module';
+import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module';
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -42,6 +43,7 @@ import { JwtDownloadModule } from './modules/jwt-download/jwt-download.module';
     PaymentModule,
     EngagementModule,
     JwtDownloadModule,
+    SubscriptionsModule,
   ],
 })
 export class AppModule {}

@@ -17,11 +17,15 @@ import { ProfileGuard } from '@/modules/auth/profile.guard';
 import { CurrentUser, UserSession } from '@/modules/auth/current-user.decorator';
 import { ProfileService } from './profile.service';
 import { CreateProfileDto, UpdateProfileDto } from './profile.dto';
+import { SubscriptionsService } from '@/modules/subscriptions/subscriptions.service';
 
 @ApiTags('Profile')
 @Controller('profile')
 export class ProfileController {
-  constructor(private profileService: ProfileService) {}
+  constructor(
+    private profileService: ProfileService,
+    private readonly subscriptionsService: SubscriptionsService,
+  ) {}
 
   @Post()
   @UseGuards(AuthGuard)
@@ -43,7 +47,7 @@ export class ProfileController {
     if (!profile) {
       throw new NotFoundException('Profile not found');
     }
-    return profile;
+    return this.profileService.toPrivateProfileResponse(profile);
   }
 
   @Get('me/stats')
@@ -59,20 +63,81 @@ export class ProfileController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Validate if current user has premium access' })
   async validatePremium(@CurrentUser() user: UserSession) {
-    const profile = await this.profileService.findById(user.profileId!);
-    if (!profile) {
-      throw new NotFoundException('Profile not found');
-    }
-
-    const isPremium = profile.plan === 'premium' && 
-      (profile.premiumExpireAt === null || profile.premiumExpireAt > new Date());
+    const summary = await this.subscriptionsService.getProfileSubscriptionSummary(
+      user.profileId!,
+    );
+    const currentPeriodEnd =
+      summary.currentPeriodEnd ? new Date(summary.currentPeriodEnd) : null;
+    const isPremium =
+      summary.plan === 'premium' &&
+      !!currentPeriodEnd &&
+      Number.isFinite(currentPeriodEnd.getTime()) &&
+      currentPeriodEnd.getTime() > Date.now() &&
+      ['active', 'canceling', 'past_due'].includes(summary.status);
 
     return {
       isValid: true,
       isPremium,
-      plan: profile.plan,
-      premiumExpireAt: profile.premiumExpireAt,
+      plan: summary.plan,
+      premiumExpireAt: summary.currentPeriodEnd,
+      subscription: summary,
     };
+  }
+
+  @Get('me/subscription')
+  @UseGuards(AuthGuard, ProfileGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get current user subscription summary' })
+  async getMySubscription(@CurrentUser() user: UserSession) {
+    return this.subscriptionsService.getProfileSubscriptionSummary(
+      user.profileId!,
+    );
+  }
+
+  @Post('me/subscription/checkout')
+  @UseGuards(AuthGuard, ProfileGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Create a Stripe checkout session for premium' })
+  async createMySubscriptionCheckout(
+    @CurrentUser() user: UserSession,
+    @Body('cycle') cycle: '1w' | '1m' | '3m' | '6m',
+  ) {
+    return this.subscriptionsService.createCheckoutSession(
+      user.profileId!,
+      cycle,
+    );
+  }
+
+  @Post('me/subscription/confirm')
+  @UseGuards(AuthGuard, ProfileGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Confirm and sync a Stripe checkout session for premium' })
+  async confirmMySubscriptionCheckout(
+    @CurrentUser() user: UserSession,
+    @Body('sessionId') sessionId: string,
+  ) {
+    return this.subscriptionsService.confirmCheckoutSession(
+      user.profileId!,
+      sessionId,
+    );
+  }
+
+  @Post('me/subscription/cancel')
+  @UseGuards(AuthGuard, ProfileGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Cancel current user subscription at period end' })
+  async cancelMySubscription(@CurrentUser() user: UserSession) {
+    return this.subscriptionsService.cancelSubscriptionAtPeriodEnd(
+      user.profileId!,
+    );
+  }
+
+  @Post('me/subscription/reactivate')
+  @UseGuards(AuthGuard, ProfileGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Reactivate current user subscription before period end' })
+  async reactivateMySubscription(@CurrentUser() user: UserSession) {
+    return this.subscriptionsService.reactivateSubscription(user.profileId!);
   }
 
   @Put('me')

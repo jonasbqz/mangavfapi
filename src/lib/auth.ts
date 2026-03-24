@@ -11,10 +11,15 @@ const pool = new Pool({
 });
 
 const db = drizzle(pool, { schema });
+const authBaseUrl = process.env.BASE_URL || 'http://localhost:8085';
+const isLocalAuthBaseUrl =
+  authBaseUrl.includes('localhost') || authBaseUrl.includes('127.0.0.1');
+const shouldUseSecureCookies =
+  process.env.NODE_ENV === 'production' && !isLocalAuthBaseUrl;
 
 export const auth = betterAuth({
   secret: process.env.BETTER_AUTH_SECRET,
-  baseURL: process.env.BASE_URL || 'http://localhost:8085',
+  baseURL: authBaseUrl,
   database: drizzleAdapter(db, {
     provider: 'pg',
     schema: {
@@ -35,25 +40,27 @@ export const auth = betterAuth({
     },
   },
   session: {
-    expiresIn: 60 * 60 * 24 * 30, // 30 days
-    updateAge: 60 * 60 * 24 * 7, // 7 days (refresh session weekly)
+    expiresIn: 60 * 60 * 24 * 30,
+    updateAge: 60 * 60 * 24 * 7,
     cookieCache: {
       enabled: true,
-      maxAge: 60 * 60, // 1 hour cache
+      maxAge: 60 * 60,
     },
   },
   trustedOrigins: [
-    ...(process.env.CORS_ORIGIN?.split(',') || ['http://localhost:3000', 'https://mangolibreria.com']),
+    ...(process.env.CORS_ORIGIN?.split(',') || [
+      'http://localhost:3000',
+      'https://mangolibreria.com',
+    ]),
     'https://mangolibreria.com',
     'https://www.mangolibreria.com',
     'http://mangas-mainmango-3i1hl5:8087',
   ],
   advanced: {
-    // ❌ ELIMINADO: crossSubDomainCookies no funciona entre dominios distintos
     defaultCookieAttributes: {
-      secure: true,      // ✅ OBLIGATORIO para sameSite "none"
-      httpOnly: true,    // ✅ Protege contra XSS
-      sameSite: 'none',  // ✅ PERMITE QUE EL FRONTEND LEA/ENVIE COOKIES AL BACKEND
+      secure: shouldUseSecureCookies,
+      httpOnly: true,
+      sameSite: shouldUseSecureCookies ? 'none' : 'lax',
     },
   },
   plugins: [bearer()],

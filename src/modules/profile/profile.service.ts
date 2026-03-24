@@ -1,10 +1,19 @@
 import { Injectable, Inject, ConflictException, NotFoundException } from '@nestjs/common';
 import { eq, count, countDistinct } from 'drizzle-orm';
 import { DATABASE_CONNECTION } from '@/database/database.module';
-import { profiles, likes, comments, playlists, readingHistory, bookmarks } from '@/database/schema';
+import {
+  profiles,
+  likes,
+  comments,
+  playlists,
+  readingHistory,
+  bookmarks,
+  user as authUser,
+} from '@/database/schema';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '@/database/schema';
 import { CreateProfileDto, UpdateProfileDto } from './profile.dto';
+import { buildSubscriptionSummary } from '@/modules/subscriptions/subscriptions.types';
 
 @Injectable()
 export class ProfileService {
@@ -45,21 +54,69 @@ export class ProfileService {
   }
 
   async findByUserId(userId: string) {
-    return this.db.query.profiles.findFirst({
+    const profile = await this.db.query.profiles.findFirst({
       where: eq(profiles.userId, userId),
     });
+    return profile ? this.mergeLegacySubscriptionState(profile) : null;
   }
 
   async findById(id: string) {
-    return this.db.query.profiles.findFirst({
+    const profile = await this.db.query.profiles.findFirst({
       where: eq(profiles.id, id),
     });
+    return profile ? this.mergeLegacySubscriptionState(profile) : null;
   }
 
   async findByUsername(username: string) {
     return this.db.query.profiles.findFirst({
       where: eq(profiles.username, username),
     });
+  }
+
+  private async mergeLegacySubscriptionState(
+    profile: typeof profiles.$inferSelect,
+  ): Promise<typeof profiles.$inferSelect> {
+    const legacyUser = await this.db.query.user.findFirst({
+      where: eq(authUser.id, profile.userId),
+    });
+
+    if (!legacyUser) {
+      return profile;
+    }
+
+    const legacyHasPremiumAccess =
+      legacyUser.plan === 'premium' &&
+      legacyUser.premiumExpireAt !== null;
+
+    const nextPlan: typeof profiles.$inferSelect.plan =
+      profile.plan === 'premium'
+        ? 'premium'
+        : legacyHasPremiumAccess
+          ? 'premium'
+          : profile.plan;
+    const nextPremiumExpireAt =
+      profile.premiumExpireAt ??
+      (legacyHasPremiumAccess ? legacyUser.premiumExpireAt : null) ??
+      null;
+
+    if (nextPlan === profile.plan && nextPremiumExpireAt === profile.premiumExpireAt) {
+      return profile;
+    }
+
+    await this.db
+      .update(profiles)
+      .set({
+        plan: nextPlan,
+        premiumExpireAt: nextPremiumExpireAt,
+        updatedAt: new Date(),
+      })
+      .where(eq(profiles.id, profile.id));
+
+    return {
+      ...profile,
+      plan: nextPlan,
+      premiumExpireAt: nextPremiumExpireAt,
+    };
   }
 
   toPrivateProfileResponse(profile: typeof profiles.$inferSelect) {
@@ -73,7 +130,20 @@ export class ProfileService {
       dateOfBirth: profile.dateOfBirth,
       isAdultContent: profile.isAdultContent,
       plan: profile.plan,
+      premiumSource: profile.premiumSource,
+      premiumCycle: profile.premiumCycle,
+      premiumStartedAt: profile.premiumStartedAt,
       premiumExpireAt: profile.premiumExpireAt,
+      stripeCustomerId: profile.stripeCustomerId,
+      stripeSubscriptionId: profile.stripeSubscriptionId,
+      stripeSubscriptionStatus: profile.stripeSubscriptionStatus,
+      stripeCancelAtPeriodEnd: profile.stripeCancelAtPeriodEnd,
+      stripeCurrentPeriodStart: profile.stripeCurrentPeriodStart,
+      stripeCurrentPeriodEnd: profile.stripeCurrentPeriodEnd,
+      stripeProductName: profile.stripeProductName,
+      stripePriceLabel: profile.stripePriceLabel,
+      stripeLastSyncedAt: profile.stripeLastSyncedAt,
+      subscription: buildSubscriptionSummary(profile),
       createdAt: profile.createdAt,
       updatedAt: profile.updatedAt,
     };
