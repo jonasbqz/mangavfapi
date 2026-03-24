@@ -118,8 +118,9 @@ export class RouteProtectionService {
   async getChapterPath(
     comic: ProtectedComicShape,
     chapter: ProtectedChapterShape,
+    options?: { comicPath?: string },
   ): Promise<string> {
-    const comicPath = await this.getComicPath(comic);
+    const comicPath = options?.comicPath || await this.getComicPath(comic);
 
     if (!this.isProtected(comic)) {
       return `${comicPath}/chapters/${chapter.id}`;

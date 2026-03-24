@@ -61,17 +61,23 @@ export class ChapterController {
       : null;
 
     const chapterPath = comic
-      ? await this.routeProtectionService.getChapterPath(comic, chapter)
+      ? await this.routeProtectionService.getChapterPath(comic, chapter, {
+          comicPath: comicPath || undefined,
+        })
       : null;
 
     const prevChapterPath =
       comic && navigation.prev
-        ? await this.routeProtectionService.getChapterPath(comic, navigation.prev)
+        ? await this.routeProtectionService.getChapterPath(comic, navigation.prev, {
+            comicPath: comicPath || undefined,
+          })
         : null;
 
     const nextChapterPath =
       comic && navigation.next
-        ? await this.routeProtectionService.getChapterPath(comic, navigation.next)
+        ? await this.routeProtectionService.getChapterPath(comic, navigation.next, {
+            comicPath: comicPath || undefined,
+          })
         : null;
 
     return {

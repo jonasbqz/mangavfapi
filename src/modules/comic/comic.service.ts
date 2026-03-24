@@ -54,10 +54,14 @@ export class ComicService {
   private async buildRecentChapterSummaries<
     T extends { id: number; slug: string; protectedRouteEnabled?: boolean | null },
   >(comic: T, recentChapters: Array<{ id: number; [key: string]: any }>) {
+    const comicPath = await this.routeProtectionService.getComicPath(comic);
+
     return Promise.all(
       recentChapters.map(async (chapter) => ({
         ...chapter,
-        chapterPath: await this.routeProtectionService.getChapterPath(comic, chapter),
+        chapterPath: await this.routeProtectionService.getChapterPath(comic, chapter, {
+          comicPath,
+        }),
       })),
     );
   }
@@ -70,7 +74,9 @@ export class ComicService {
         chapters: await Promise.all(
           (comicScan.chapters || []).map(async (chapter: any) => ({
             ...chapter,
-            chapterPath: await this.routeProtectionService.getChapterPath(comic, chapter),
+            chapterPath: await this.routeProtectionService.getChapterPath(comic, chapter, {
+              comicPath,
+            }),
           })),
         ),
       })),
@@ -792,13 +798,21 @@ export class ComicService {
       throw new NotFoundException('Comic scan not found');
     }
 
+    const comicPath = await this.routeProtectionService.getComicPath(comicScan.comic);
+
     return {
       ...comicScan,
-      comicPath: await this.routeProtectionService.getComicPath(comicScan.comic),
+      comicPath,
       chapters: await Promise.all(
         (comicScan.chapters || []).map(async (chapter) => ({
           ...chapter,
-          chapterPath: await this.routeProtectionService.getChapterPath(comicScan.comic, chapter),
+          chapterPath: await this.routeProtectionService.getChapterPath(
+            comicScan.comic,
+            chapter,
+            {
+              comicPath,
+            },
+          ),
         })),
       ),
     };
