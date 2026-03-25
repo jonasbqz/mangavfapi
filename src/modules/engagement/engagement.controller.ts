@@ -60,7 +60,7 @@ export class EngagementController {
   var _d = function(s){ return atob(s); };
 
   // Excluded paths
-  var _xp = ['/login', '/playlist', '/terms', '/privacy', '/disclaimer', '/profile', '/premium'];
+  var _xp = ['/login', '/playlist', '/terms', '/privacy', '/disclaimer', '/profile', '/premium', '/register'];
 
   // ---- Configuration ----
   var COOLDOWN       = 12000;    // 13s minimum between any link show
