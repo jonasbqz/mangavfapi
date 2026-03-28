@@ -94,6 +94,48 @@ export class ProfileController {
     );
   }
 
+  private sanitizeRefundRequestForProfile(
+    request:
+      | Awaited<ReturnType<SubscriptionsService['getCurrentRefundRequest']>>
+      | Awaited<ReturnType<SubscriptionsService['createRefundRequest']>>,
+  ) {
+    if (!request) {
+      return null;
+    }
+
+    return {
+      ...request,
+      adminNote: null,
+      resolvedByAdminId: null,
+    };
+  }
+
+  @Get('me/subscription/refund-request')
+  @UseGuards(AuthGuard, ProfileGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get current user refund request for Stripe premium' })
+  async getMyRefundRequest(@CurrentUser() user: UserSession) {
+    const request = await this.subscriptionsService.getCurrentRefundRequest(
+      user.profileId!,
+    );
+    return this.sanitizeRefundRequestForProfile(request);
+  }
+
+  @Post('me/subscription/refund-request')
+  @UseGuards(AuthGuard, ProfileGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Create a refund claim for current Stripe premium subscription' })
+  async createMyRefundRequest(
+    @CurrentUser() user: UserSession,
+    @Body('reason') reason: string,
+  ) {
+    const request = await this.subscriptionsService.createRefundRequest(
+      user.profileId!,
+      reason,
+    );
+    return this.sanitizeRefundRequestForProfile(request);
+  }
+
   @Post('me/subscription/checkout')
   @UseGuards(AuthGuard, ProfileGuard)
   @ApiBearerAuth()

@@ -7,10 +7,10 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DATABASE_CONNECTION } from '@/database/database.module';
-import { profiles, user } from '@/database/schema';
+import { premiumRefundRequests, profiles, user } from '@/database/schema';
 import type * as schema from '@/database/schema';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { eq } from 'drizzle-orm';
+import { and, desc, eq, ilike, or, sql } from 'drizzle-orm';
 import { createHmac, timingSafeEqual } from 'crypto';
 import {
   getAllowedPersonalEmailDomainsLabel,
@@ -19,8 +19,11 @@ import {
 import {
   buildSubscriptionSummary,
   type PremiumCycle,
+  type PremiumRefundRequest,
+  type PremiumRefundRequestListResponse,
   type ProfileRecord,
   type PremiumSource,
+  type RefundRequestStatus,
   type SubscriptionSummary,
 } from './subscriptions.types';
 
@@ -91,6 +94,12 @@ interface StripeCheckoutSession {
   payment_status?: string | null;
 }
 
+type RefundRequestRecord = typeof premiumRefundRequests.$inferSelect & {
+  username: string | null;
+  visibleName: string | null;
+  email: string | null;
+};
+
 @Injectable()
 export class SubscriptionsService {
   private readonly logger = new Logger(SubscriptionsService.name);
@@ -108,6 +117,222 @@ export class SubscriptionsService {
   async getProfileSubscriptionSummary(profileId: string): Promise<SubscriptionSummary> {
     const profile = await this.getProfileById(profileId);
     return buildSubscriptionSummary(profile);
+  }
+
+  async getCurrentRefundRequest(profileId: string): Promise<PremiumRefundRequest | null> {
+    const profile = await this.getProfileById(profileId);
+
+    if (!profile.stripeSubscriptionId) {
+      return null;
+    }
+
+    const request = await this.findLatestRefundRequestForSubscription(
+      profile.id,
+      profile.stripeSubscriptionId,
+    );
+
+    return request ? this.mapRefundRequestRecord(request) : null;
+  }
+
+  async createRefundRequest(
+    profileId: string,
+    reason: string,
+  ): Promise<PremiumRefundRequest> {
+    const normalizedReason = reason?.trim();
+
+    if (!normalizedReason || normalizedReason.length < 10) {
+      throw new BadRequestException(
+        'Explain the refund reason with at least 10 characters',
+      );
+    }
+
+    if (normalizedReason.length > 2000) {
+      throw new BadRequestException('Refund reason is too long');
+    }
+
+    const profile = await this.getProfileById(profileId);
+    const summary = buildSubscriptionSummary(profile);
+
+    if (
+      summary.paymentMethod !== 'stripe' ||
+      summary.plan !== 'premium' ||
+      !summary.stripeSubscriptionId
+    ) {
+      throw new BadRequestException(
+        'Only Stripe premium subscriptions can create refund requests',
+      );
+    }
+
+    const existingOpenRequest = await this.findOpenRefundRequest(
+      profile.id,
+      summary.stripeSubscriptionId,
+    );
+
+    if (existingOpenRequest) {
+      throw new BadRequestException(
+        'There is already an open refund request for this subscription',
+      );
+    }
+
+    const inserted = await this.db
+      .insert(premiumRefundRequests)
+      .values({
+        profileId: profile.id,
+        userId: profile.userId,
+        stripeSubscriptionId: summary.stripeSubscriptionId,
+        stripeCustomerId: profile.stripeCustomerId,
+        reason: normalizedReason,
+        status: 'pending',
+        plan: summary.plan,
+        cycle: summary.cycle,
+        paymentMethod: summary.paymentMethod,
+        currentPeriodEnd: summary.currentPeriodEnd
+          ? new Date(summary.currentPeriodEnd)
+          : null,
+        priceLabel: summary.priceLabel,
+        productName: summary.productName,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning({
+        id: premiumRefundRequests.id,
+      });
+
+    return this.getRefundRequestById(inserted[0].id);
+  }
+
+  async listRefundRequests(input: {
+    status?: string;
+    search?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<PremiumRefundRequestListResponse> {
+    const page = Math.max(1, input.page ?? 1);
+    const limit = Math.min(100, Math.max(1, input.limit ?? 20));
+    const offset = (page - 1) * limit;
+    const whereClause = this.buildRefundRequestWhereClause(input);
+
+    const items = await this.db
+      .select({
+        id: premiumRefundRequests.id,
+        profileId: premiumRefundRequests.profileId,
+        userId: premiumRefundRequests.userId,
+        stripeSubscriptionId: premiumRefundRequests.stripeSubscriptionId,
+        stripeCustomerId: premiumRefundRequests.stripeCustomerId,
+        reason: premiumRefundRequests.reason,
+        status: premiumRefundRequests.status,
+        adminNote: premiumRefundRequests.adminNote,
+        resolvedByAdminId: premiumRefundRequests.resolvedByAdminId,
+        resolvedAt: premiumRefundRequests.resolvedAt,
+        plan: premiumRefundRequests.plan,
+        cycle: premiumRefundRequests.cycle,
+        paymentMethod: premiumRefundRequests.paymentMethod,
+        currentPeriodEnd: premiumRefundRequests.currentPeriodEnd,
+        priceLabel: premiumRefundRequests.priceLabel,
+        productName: premiumRefundRequests.productName,
+        createdAt: premiumRefundRequests.createdAt,
+        updatedAt: premiumRefundRequests.updatedAt,
+        username: profiles.username,
+        visibleName: profiles.visibleName,
+        email: user.email,
+      })
+      .from(premiumRefundRequests)
+      .leftJoin(profiles, eq(premiumRefundRequests.profileId, profiles.id))
+      .leftJoin(user, eq(premiumRefundRequests.userId, user.id))
+      .where(whereClause)
+      .orderBy(desc(premiumRefundRequests.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    const totalRows = await this.db
+      .select({
+        count: sql<number>`count(*)`,
+      })
+      .from(premiumRefundRequests)
+      .leftJoin(profiles, eq(premiumRefundRequests.profileId, profiles.id))
+      .leftJoin(user, eq(premiumRefundRequests.userId, user.id))
+      .where(whereClause);
+
+    const total = Number(totalRows[0]?.count ?? 0);
+
+    return {
+      items: items.map((item) => this.mapRefundRequestRecord(item)),
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+    };
+  }
+
+  async getRefundRequestById(id: string): Promise<PremiumRefundRequest> {
+    const request = await this.findRefundRequestById(id);
+
+    if (!request) {
+      throw new NotFoundException('Refund request not found');
+    }
+
+    return this.mapRefundRequestRecord(request);
+  }
+
+  async updateRefundRequest(inputId: string, input: {
+    status?: string;
+    adminNote?: string;
+    actorId?: string | null;
+  }): Promise<PremiumRefundRequest> {
+    const request = await this.findRefundRequestById(inputId);
+
+    if (!request) {
+      throw new NotFoundException('Refund request not found');
+    }
+
+    const nextStatus = input.status
+      ? this.parseRefundRequestStatus(input.status)
+      : request.status;
+    const nextAdminNote =
+      input.adminNote !== undefined ? input.adminNote.trim() || null : request.adminNote;
+
+    if (nextStatus !== request.status) {
+      if (nextStatus === 'reviewing' && request.status !== 'pending') {
+        throw new BadRequestException(
+          'Only pending refund requests can move to reviewing',
+        );
+      }
+
+      if (
+        (nextStatus === 'approved' || nextStatus === 'rejected') &&
+        !['pending', 'reviewing'].includes(request.status)
+      ) {
+        throw new BadRequestException(
+          'Only pending or reviewing refund requests can be resolved',
+        );
+      }
+    }
+
+    const isResolved = nextStatus === 'approved' || nextStatus === 'rejected';
+    const statusChanged = nextStatus !== request.status;
+
+    await this.db
+      .update(premiumRefundRequests)
+      .set({
+        status: nextStatus,
+        adminNote: nextAdminNote,
+        resolvedByAdminId: isResolved
+          ? statusChanged
+            ? input.actorId ?? null
+            : request.resolvedByAdminId ?? null
+          : null,
+        resolvedAt: isResolved
+          ? statusChanged
+            ? new Date()
+            : request.resolvedAt ?? null
+          : null,
+        updatedAt: new Date(),
+      })
+      .where(eq(premiumRefundRequests.id, inputId));
+
+    return this.getRefundRequestById(inputId);
   }
 
   async createCheckoutSession(profileId: string, cycle: PremiumCycle) {
@@ -279,6 +504,44 @@ export class SubscriptionsService {
     );
 
     const updatedProfile = await this.syncProfileFromStripeSubscription(profile, subscription);
+    return buildSubscriptionSummary(updatedProfile);
+  }
+
+  async takeOverStripeSubscription(profileId: string): Promise<SubscriptionSummary> {
+    const profile = await this.getProfileById(profileId);
+
+    if (profile.premiumSource !== 'stripe') {
+      throw new BadRequestException('Only Stripe-managed subscriptions can be taken over');
+    }
+
+    let nextProfile = profile;
+
+    if (profile.stripeSubscriptionId) {
+      let subscription: StripeSubscription | null = null;
+
+      if (profile.stripeCancelAtPeriodEnd) {
+        subscription = await this.retrieveStripeSubscription(profile.stripeSubscriptionId);
+      } else {
+        subscription = await this.updateStripeSubscription(
+          profile.stripeSubscriptionId,
+          new URLSearchParams({
+            cancel_at_period_end: 'true',
+          }),
+        );
+      }
+
+      nextProfile = await this.syncProfileFromStripeSubscription(profile, subscription);
+    }
+
+    await this.db
+      .update(profiles)
+      .set({
+        premiumSource: 'manual',
+        updatedAt: new Date(),
+      })
+      .where(eq(profiles.id, nextProfile.id));
+
+    const updatedProfile = await this.getProfileById(nextProfile.id);
     return buildSubscriptionSummary(updatedProfile);
   }
 
@@ -584,6 +847,180 @@ export class SubscriptionsService {
       stripeCurrentPeriodStart: currentPeriodStart,
       stripeCurrentPeriodEnd: currentPeriodEnd,
       stripeLastSyncedAt: new Date(),
+    };
+  }
+
+  private parseRefundRequestStatus(value: string): RefundRequestStatus {
+    if (
+      value === 'pending' ||
+      value === 'reviewing' ||
+      value === 'approved' ||
+      value === 'rejected'
+    ) {
+      return value;
+    }
+
+    throw new BadRequestException('Invalid refund request status');
+  }
+
+  private buildRefundRequestWhereClause(input: {
+    status?: string;
+    search?: string;
+  }) {
+    const conditions: any[] = [];
+
+    if (input.status) {
+      conditions.push(
+        eq(
+          premiumRefundRequests.status,
+          this.parseRefundRequestStatus(input.status),
+        ),
+      );
+    }
+
+    const normalizedSearch = input.search?.trim();
+    if (normalizedSearch) {
+      const pattern = `%${normalizedSearch}%`;
+      conditions.push(
+        or(
+          ilike(profiles.username, pattern),
+          ilike(profiles.visibleName, pattern),
+          ilike(user.email, pattern),
+          ilike(premiumRefundRequests.stripeSubscriptionId, pattern),
+        )!,
+      );
+    }
+
+    if (conditions.length === 0) {
+      return undefined;
+    }
+
+    return and(...conditions);
+  }
+
+  private async findOpenRefundRequest(
+    profileId: string,
+    stripeSubscriptionId: string,
+  ) {
+    return this.db.query.premiumRefundRequests.findFirst({
+      where: and(
+        eq(premiumRefundRequests.profileId, profileId),
+        eq(premiumRefundRequests.stripeSubscriptionId, stripeSubscriptionId),
+        or(
+          eq(premiumRefundRequests.status, 'pending'),
+          eq(premiumRefundRequests.status, 'reviewing'),
+        )!,
+      ),
+      orderBy: [desc(premiumRefundRequests.createdAt)],
+    });
+  }
+
+  private async findLatestRefundRequestForSubscription(
+    profileId: string,
+    stripeSubscriptionId: string,
+  ): Promise<RefundRequestRecord | null> {
+    const rows = await this.db
+      .select({
+        id: premiumRefundRequests.id,
+        profileId: premiumRefundRequests.profileId,
+        userId: premiumRefundRequests.userId,
+        stripeSubscriptionId: premiumRefundRequests.stripeSubscriptionId,
+        stripeCustomerId: premiumRefundRequests.stripeCustomerId,
+        reason: premiumRefundRequests.reason,
+        status: premiumRefundRequests.status,
+        adminNote: premiumRefundRequests.adminNote,
+        resolvedByAdminId: premiumRefundRequests.resolvedByAdminId,
+        resolvedAt: premiumRefundRequests.resolvedAt,
+        plan: premiumRefundRequests.plan,
+        cycle: premiumRefundRequests.cycle,
+        paymentMethod: premiumRefundRequests.paymentMethod,
+        currentPeriodEnd: premiumRefundRequests.currentPeriodEnd,
+        priceLabel: premiumRefundRequests.priceLabel,
+        productName: premiumRefundRequests.productName,
+        createdAt: premiumRefundRequests.createdAt,
+        updatedAt: premiumRefundRequests.updatedAt,
+        username: profiles.username,
+        visibleName: profiles.visibleName,
+        email: user.email,
+      })
+      .from(premiumRefundRequests)
+      .leftJoin(profiles, eq(premiumRefundRequests.profileId, profiles.id))
+      .leftJoin(user, eq(premiumRefundRequests.userId, user.id))
+      .where(
+        and(
+          eq(premiumRefundRequests.profileId, profileId),
+          eq(premiumRefundRequests.stripeSubscriptionId, stripeSubscriptionId),
+        ),
+      )
+      .orderBy(desc(premiumRefundRequests.createdAt))
+      .limit(1);
+
+    return rows[0] ?? null;
+  }
+
+  private async findRefundRequestById(id: string): Promise<RefundRequestRecord | null> {
+    const rows = await this.db
+      .select({
+        id: premiumRefundRequests.id,
+        profileId: premiumRefundRequests.profileId,
+        userId: premiumRefundRequests.userId,
+        stripeSubscriptionId: premiumRefundRequests.stripeSubscriptionId,
+        stripeCustomerId: premiumRefundRequests.stripeCustomerId,
+        reason: premiumRefundRequests.reason,
+        status: premiumRefundRequests.status,
+        adminNote: premiumRefundRequests.adminNote,
+        resolvedByAdminId: premiumRefundRequests.resolvedByAdminId,
+        resolvedAt: premiumRefundRequests.resolvedAt,
+        plan: premiumRefundRequests.plan,
+        cycle: premiumRefundRequests.cycle,
+        paymentMethod: premiumRefundRequests.paymentMethod,
+        currentPeriodEnd: premiumRefundRequests.currentPeriodEnd,
+        priceLabel: premiumRefundRequests.priceLabel,
+        productName: premiumRefundRequests.productName,
+        createdAt: premiumRefundRequests.createdAt,
+        updatedAt: premiumRefundRequests.updatedAt,
+        username: profiles.username,
+        visibleName: profiles.visibleName,
+        email: user.email,
+      })
+      .from(premiumRefundRequests)
+      .leftJoin(profiles, eq(premiumRefundRequests.profileId, profiles.id))
+      .leftJoin(user, eq(premiumRefundRequests.userId, user.id))
+      .where(eq(premiumRefundRequests.id, id))
+      .limit(1);
+
+    return rows[0] ?? null;
+  }
+
+  private mapRefundRequestRecord(record: RefundRequestRecord): PremiumRefundRequest {
+    return {
+      id: record.id,
+      profileId: record.profileId,
+      userId: record.userId,
+      username: record.username ?? null,
+      visibleName: record.visibleName ?? null,
+      email: record.email ?? null,
+      stripeSubscriptionId: record.stripeSubscriptionId,
+      stripeCustomerId: record.stripeCustomerId ?? null,
+      reason: record.reason,
+      status: record.status,
+      adminNote: record.adminNote ?? null,
+      resolvedByAdminId: record.resolvedByAdminId ?? null,
+      resolvedAt: record.resolvedAt ? new Date(record.resolvedAt).toISOString() : null,
+      plan: record.plan,
+      cycle: record.cycle ?? null,
+      paymentMethod: record.paymentMethod ?? null,
+      currentPeriodEnd: record.currentPeriodEnd
+        ? new Date(record.currentPeriodEnd).toISOString()
+        : null,
+      priceLabel: record.priceLabel ?? null,
+      productName: record.productName ?? null,
+      createdAt: record.createdAt
+        ? new Date(record.createdAt).toISOString()
+        : new Date().toISOString(),
+      updatedAt: record.updatedAt
+        ? new Date(record.updatedAt).toISOString()
+        : new Date().toISOString(),
     };
   }
 

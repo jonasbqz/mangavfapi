@@ -12,6 +12,7 @@ export type SubscriptionStatus =
   | 'canceled'
   | 'incomplete'
   | 'basic';
+export type RefundRequestStatus = 'pending' | 'reviewing' | 'approved' | 'rejected';
 
 export interface SubscriptionSummary {
   provider: 'stripe' | 'manual' | 'legacy';
@@ -27,6 +28,40 @@ export interface SubscriptionSummary {
   productName: string | null;
   priceLabel: string | null;
   stripeSubscriptionId: string | null;
+}
+
+export interface PremiumRefundRequest {
+  id: string;
+  profileId: string;
+  userId: string;
+  username: string | null;
+  visibleName: string | null;
+  email: string | null;
+  stripeSubscriptionId: string;
+  stripeCustomerId: string | null;
+  reason: string;
+  status: RefundRequestStatus;
+  adminNote: string | null;
+  resolvedByAdminId: string | null;
+  resolvedAt: string | null;
+  plan: SubscriptionPlan;
+  cycle: PremiumCycle | null;
+  paymentMethod: SubscriptionPaymentMethod;
+  currentPeriodEnd: string | null;
+  priceLabel: string | null;
+  productName: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PremiumRefundRequestListResponse {
+  items: PremiumRefundRequest[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
 }
 
 export type ProfileRecord = typeof profiles.$inferSelect;

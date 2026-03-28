@@ -73,6 +73,37 @@ export const profiles = pgTable('profiles', {
   stripeSubscriptionIdIdx: index('profiles_stripe_subscription_idx').on(table.stripeSubscriptionId),
 }));
 
+export const premiumRefundRequests = pgTable('premium_refund_requests', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  profileId: uuid('profile_id')
+    .notNull()
+    .references(() => profiles.id, { onDelete: 'cascade' }),
+  userId: text('user_id')
+    .notNull()
+    .references(() => user.id, { onDelete: 'cascade' }),
+  stripeSubscriptionId: text('stripe_subscription_id').notNull(),
+  stripeCustomerId: text('stripe_customer_id'),
+  reason: text('reason').notNull(),
+  status: text('status').$type<'pending' | 'reviewing' | 'approved' | 'rejected'>().notNull().default('pending'),
+  adminNote: text('admin_note'),
+  resolvedByAdminId: text('resolved_by_admin_id'),
+  resolvedAt: timestamp('resolved_at'),
+  plan: userPlanEnum('plan').notNull().default('premium'),
+  cycle: premiumCycleEnum('cycle'),
+  paymentMethod: text('payment_method').$type<'stripe' | 'other' | null>(),
+  currentPeriodEnd: timestamp('current_period_end'),
+  priceLabel: text('price_label'),
+  productName: text('product_name'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (table) => ({
+  profileIdIdx: index('premium_refund_requests_profile_idx').on(table.profileId),
+  userIdIdx: index('premium_refund_requests_user_idx').on(table.userId),
+  stripeSubscriptionIdIdx: index('premium_refund_requests_subscription_idx').on(table.stripeSubscriptionId),
+  statusIdx: index('premium_refund_requests_status_idx').on(table.status),
+  createdAtIdx: index('premium_refund_requests_created_at_idx').on(table.createdAt),
+}));
+
 // Genres
 export const genres = pgTable('genres', {
   id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
