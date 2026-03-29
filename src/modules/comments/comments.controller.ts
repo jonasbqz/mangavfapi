@@ -1,27 +1,43 @@
 import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Delete,
   Body,
+  Controller,
+  Delete,
+  Get,
+  Inject,
   Param,
-  Query,
-  UseGuards,
   ParseIntPipe,
   ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags, ApiQuery } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import type { FastifyRequest } from 'fastify';
 import { AuthGuard } from '@/modules/auth/auth.guard';
 import { ProfileGuard } from '@/modules/auth/profile.guard';
 import { CurrentUser, UserSession } from '@/modules/auth/current-user.decorator';
+import { resolveOptionalProfileId } from '@/modules/auth/session-resolver';
 import { CommentsService } from './comments.service';
-import { CreateCommentDto, UpdateCommentDto } from './comments.dto';
+import {
+  CreateCommentDto,
+  GetCommentsQueryDto,
+  UpdateCommentDto,
+  VoteCommentDto,
+} from './comments.dto';
+import { DATABASE_CONNECTION } from '@/database/database.module';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type * as schema from '@/database/schema';
 
 @ApiTags('Comments')
 @Controller('comments')
 export class CommentsController {
-  constructor(private commentsService: CommentsService) {}
+  constructor(
+    private readonly commentsService: CommentsService,
+    @Inject(DATABASE_CONNECTION)
+    private readonly db: NodePgDatabase<typeof schema>,
+  ) {}
 
   @Post()
   @UseGuards(AuthGuard, ProfileGuard)
@@ -38,48 +54,51 @@ export class CommentsController {
   @ApiOperation({ summary: 'Get comments for a comic (public)' })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'offset', required: false, type: Number })
+  @ApiQuery({ name: 'sort', required: false, enum: ['best', 'newest', 'oldest'] })
   async findByComic(
     @Param('comicId', ParseIntPipe) comicId: number,
-    @Query('limit') limit?: string,
-    @Query('offset') offset?: string,
+    @Query() query: GetCommentsQueryDto,
+    @Req() request: FastifyRequest,
   ) {
-    return this.commentsService.findByComic(
-      comicId,
-      limit ? parseInt(limit, 10) : 50,
-      offset ? parseInt(offset, 10) : 0,
+    const viewerProfileId = await resolveOptionalProfileId(
+      this.db,
+      request.headers as Record<string, any>,
     );
+    return this.commentsService.findByComic(comicId, query, viewerProfileId);
   }
 
   @Get('chapter/:chapterId')
   @ApiOperation({ summary: 'Get comments for a chapter (public)' })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'offset', required: false, type: Number })
+  @ApiQuery({ name: 'sort', required: false, enum: ['best', 'newest', 'oldest'] })
   async findByChapter(
     @Param('chapterId', ParseIntPipe) chapterId: number,
-    @Query('limit') limit?: string,
-    @Query('offset') offset?: string,
+    @Query() query: GetCommentsQueryDto,
+    @Req() request: FastifyRequest,
   ) {
-    return this.commentsService.findByChapter(
-      chapterId,
-      limit ? parseInt(limit, 10) : 50,
-      offset ? parseInt(offset, 10) : 0,
+    const viewerProfileId = await resolveOptionalProfileId(
+      this.db,
+      request.headers as Record<string, any>,
     );
+    return this.commentsService.findByChapter(chapterId, query, viewerProfileId);
   }
 
   @Get('replies/:parentId')
   @ApiOperation({ summary: 'Get replies to a comment (public)' })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'offset', required: false, type: Number })
+  @ApiQuery({ name: 'sort', required: false, enum: ['best', 'newest', 'oldest'] })
   async findReplies(
     @Param('parentId', ParseUUIDPipe) parentId: string,
-    @Query('limit') limit?: string,
-    @Query('offset') offset?: string,
+    @Query() query: GetCommentsQueryDto,
+    @Req() request: FastifyRequest,
   ) {
-    return this.commentsService.findReplies(
-      parentId,
-      limit ? parseInt(limit, 10) : 20,
-      offset ? parseInt(offset, 10) : 0,
+    const viewerProfileId = await resolveOptionalProfileId(
+      this.db,
+      request.headers as Record<string, any>,
     );
+    return this.commentsService.findReplies(parentId, query, viewerProfileId);
   }
 
   @Get('user')
@@ -106,13 +125,32 @@ export class CommentsController {
     @Param('comicId', ParseIntPipe) comicId: number,
   ) {
     const count = await this.commentsService.getComicCommentsCount(comicId);
-    return { comicId, commentsCount: count };
+    return { comicId, commentsCount: count, count };
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get a specific comment (public)' })
-  async findById(@Param('id', ParseUUIDPipe) id: string) {
-    return this.commentsService.findById(id);
+  async findById(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() request: FastifyRequest,
+  ) {
+    const viewerProfileId = await resolveOptionalProfileId(
+      this.db,
+      request.headers as Record<string, any>,
+    );
+    return this.commentsService.findById(id, viewerProfileId);
+  }
+
+  @Post(':id/vote')
+  @UseGuards(AuthGuard, ProfileGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Vote up or down on a comment' })
+  async vote(
+    @CurrentUser() user: UserSession,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: VoteCommentDto,
+  ) {
+    return this.commentsService.vote(user.profileId!, id, dto.direction);
   }
 
   @Patch(':id')

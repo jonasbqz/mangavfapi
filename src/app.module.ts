@@ -20,6 +20,8 @@ import { EngagementModule } from './modules/engagement/engagement.module';
 import { JwtDownloadModule } from './modules/jwt-download/jwt-download.module';
 import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module';
 import { RouteProtectionModule } from './modules/route-protection/route-protection.module';
+import { EntityReactionsModule } from './modules/entity-reactions/entity-reactions.module';
+import { MediaModule } from './modules/media/media.module';
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -46,6 +48,8 @@ import { RouteProtectionModule } from './modules/route-protection/route-protecti
     JwtDownloadModule,
     SubscriptionsModule,
     RouteProtectionModule,
+    EntityReactionsModule,
+    MediaModule,
   ],
 })
 export class AppModule {}

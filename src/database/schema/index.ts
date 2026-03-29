@@ -14,7 +14,7 @@ import {
   date,
   customType,
 } from 'drizzle-orm/pg-core';
-import { relations } from 'drizzle-orm';
+import { relations, sql } from 'drizzle-orm';
 
 // Import and re-export auth schema
 import { user, session, account, verification } from './auth';
@@ -28,6 +28,11 @@ export const languageEnum = pgEnum('language', ['en', 'es', 'pt']);
 export const userPlanEnum = pgEnum('user_plan', ['basic', 'premium']);
 // Keep enum order aligned with the existing Postgres type to avoid destructive Drizzle diffs.
 export const premiumCycleEnum = pgEnum('premium_cycle', ['1m', '3m', '6m', '1w']);
+export const entityReactionTargetEnum = pgEnum('entity_reaction_target', ['comic', 'chapter']);
+export const entityReactionTypeEnum = pgEnum('entity_reaction_type', ['upvote', 'funny', 'love', 'surprised', 'angry', 'sad']);
+export const mediaAssetSourceEnum = pgEnum('media_asset_source', ['uploaded', 'external']);
+export const mediaAssetTypeEnum = pgEnum('media_asset_type', ['image', 'gif', 'sticker']);
+export const storageProviderEnum = pgEnum('storage_provider', ['s3', 'r2']);
 
 const tsvector = customType<{ data: string }>({
   dataType() {
@@ -135,6 +140,13 @@ export const comics = pgTable('comics', {
   status: comicStatusEnum('status').default('ongoing'),
   views: integer('views').default(0),
   likes: integer('likes').default(0),
+  reactionsTotal: integer('reactions_total').default(0).notNull(),
+  reactionsSummary: jsonb('reactions_summary')
+    .$type<Record<'upvote' | 'funny' | 'love' | 'surprised' | 'angry' | 'sad', number>>()
+    .default(
+      sql`'{"upvote":0,"funny":0,"love":0,"surprised":0,"angry":0,"sad":0}'::jsonb`,
+    )
+    .notNull(),
   followers: integer('followers').default(0),
   protectedRouteEnabled: boolean('protected_route_enabled').default(false).notNull(),
   isNsfw: boolean('is_nsfw').default(false),
@@ -186,6 +198,13 @@ export const chapters = pgTable('chapters', {
   urlPages: jsonb('url_pages').$type<string[]>().default([]),
   views: integer('views').default(0),
   likes: integer('likes').default(0),
+  reactionsTotal: integer('reactions_total').default(0).notNull(),
+  reactionsSummary: jsonb('reactions_summary')
+    .$type<Record<'upvote' | 'funny' | 'love' | 'surprised' | 'angry' | 'sad', number>>()
+    .default(
+      sql`'{"upvote":0,"funny":0,"love":0,"surprised":0,"angry":0,"sad":0}'::jsonb`,
+    )
+    .notNull(),
   copyrighted: boolean('copyrighted').default(false),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
@@ -256,6 +275,9 @@ export const comments = pgTable('comments', {
   chapterId: integer('chapter_id').references(() => chapters.id, { onDelete: 'cascade' }),
   parentId: uuid('parent_id'),
   content: text('content').notNull(),
+  upvotesCount: integer('upvotes_count').default(0).notNull(),
+  downvotesCount: integer('downvotes_count').default(0).notNull(),
+  score: integer('score').default(0).notNull(),
   isEdited: boolean('is_edited').default(false),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
@@ -264,6 +286,78 @@ export const comments = pgTable('comments', {
   comicIdx: index('comments_comic_idx').on(table.comicId),
   chapterIdx: index('comments_chapter_idx').on(table.chapterId),
   parentIdx: index('comments_parent_idx').on(table.parentId),
+  chapterScoreIdx: index('comments_chapter_score_idx').on(table.chapterId, table.parentId, table.score),
+  comicScoreIdx: index('comments_comic_score_idx').on(table.comicId, table.parentId, table.score),
+}));
+
+export const commentVotes = pgTable('comment_votes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  commentId: uuid('comment_id')
+    .references(() => comments.id, { onDelete: 'cascade' })
+    .notNull(),
+  profileId: uuid('profile_id')
+    .references(() => profiles.id, { onDelete: 'cascade' })
+    .notNull(),
+  value: integer('value').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (table) => ({
+  commentProfileIdx: uniqueIndex('comment_votes_comment_profile_idx').on(table.commentId, table.profileId),
+  profileIdx: index('comment_votes_profile_idx').on(table.profileId),
+  commentIdx: index('comment_votes_comment_idx').on(table.commentId),
+}));
+
+export const entityReactions = pgTable('entity_reactions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  entityType: entityReactionTargetEnum('entity_type').notNull(),
+  entityId: integer('entity_id').notNull(),
+  profileId: uuid('profile_id')
+    .references(() => profiles.id, { onDelete: 'cascade' })
+    .notNull(),
+  reactionType: entityReactionTypeEnum('reaction_type').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (table) => ({
+  entityProfileIdx: uniqueIndex('entity_reactions_entity_profile_idx').on(table.entityType, table.entityId, table.profileId),
+  entityIdx: index('entity_reactions_entity_idx').on(table.entityType, table.entityId),
+  profileIdx: index('entity_reactions_profile_idx').on(table.profileId),
+}));
+
+export const mediaAssets = pgTable('media_assets', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  profileId: uuid('profile_id')
+    .references(() => profiles.id, { onDelete: 'cascade' })
+    .notNull(),
+  sourceType: mediaAssetSourceEnum('source_type').notNull(),
+  mediaType: mediaAssetTypeEnum('media_type').notNull(),
+  storageProvider: storageProviderEnum('storage_provider'),
+  storageKey: text('storage_key'),
+  originalUrl: text('original_url'),
+  mimeType: varchar('mime_type', { length: 150 }),
+  width: integer('width'),
+  height: integer('height'),
+  sizeBytes: integer('size_bytes'),
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => ({
+  profileIdx: index('media_assets_profile_idx').on(table.profileId),
+  sourceIdx: index('media_assets_source_idx').on(table.sourceType),
+  storageKeyIdx: uniqueIndex('media_assets_storage_key_idx').on(table.storageKey),
+}));
+
+export const commentAttachments = pgTable('comment_attachments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  commentId: uuid('comment_id')
+    .references(() => comments.id, { onDelete: 'cascade' })
+    .notNull(),
+  mediaAssetId: uuid('media_asset_id')
+    .references(() => mediaAssets.id, { onDelete: 'cascade' })
+    .notNull(),
+  sortOrder: integer('sort_order').default(0).notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => ({
+  commentMediaIdx: uniqueIndex('comment_attachments_comment_media_idx').on(table.commentId, table.mediaAssetId),
+  commentIdx: index('comment_attachments_comment_idx').on(table.commentId),
+  mediaIdx: index('comment_attachments_media_idx').on(table.mediaAssetId),
 }));
 
 // Playlists - Listas personalizadas de comics
@@ -310,6 +404,9 @@ export const profilesRelations = relations(profiles, ({ many }) => ({
   likes: many(likes),
   chapterLikes: many(chapterLikes),
   comments: many(comments),
+  commentVotes: many(commentVotes),
+  entityReactions: many(entityReactions),
+  mediaAssets: many(mediaAssets),
   playlists: many(playlists),
 }));
 
@@ -380,6 +477,27 @@ export const commentsRelations = relations(comments, ({ one, many }) => ({
   chapter: one(chapters, { fields: [comments.chapterId], references: [chapters.id] }),
   parent: one(comments, { fields: [comments.parentId], references: [comments.id], relationName: 'parentChild' }),
   replies: many(comments, { relationName: 'parentChild' }),
+  votes: many(commentVotes),
+  attachments: many(commentAttachments),
+}));
+
+export const commentVotesRelations = relations(commentVotes, ({ one }) => ({
+  comment: one(comments, { fields: [commentVotes.commentId], references: [comments.id] }),
+  profile: one(profiles, { fields: [commentVotes.profileId], references: [profiles.id] }),
+}));
+
+export const mediaAssetsRelations = relations(mediaAssets, ({ one, many }) => ({
+  profile: one(profiles, { fields: [mediaAssets.profileId], references: [profiles.id] }),
+  commentAttachments: many(commentAttachments),
+}));
+
+export const commentAttachmentsRelations = relations(commentAttachments, ({ one }) => ({
+  comment: one(comments, { fields: [commentAttachments.commentId], references: [comments.id] }),
+  mediaAsset: one(mediaAssets, { fields: [commentAttachments.mediaAssetId], references: [mediaAssets.id] }),
+}));
+
+export const entityReactionsRelations = relations(entityReactions, ({ one }) => ({
+  profile: one(profiles, { fields: [entityReactions.profileId], references: [profiles.id] }),
 }));
 
 // Playlists relations
