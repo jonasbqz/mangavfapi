@@ -328,6 +328,7 @@ export const mediaAssets = pgTable('media_assets', {
   profileId: uuid('profile_id')
     .references(() => profiles.id, { onDelete: 'cascade' })
     .notNull(),
+  galleryVisible: boolean('gallery_visible').default(true).notNull(),
   sourceType: mediaAssetSourceEnum('source_type').notNull(),
   mediaType: mediaAssetTypeEnum('media_type').notNull(),
   storageProvider: storageProviderEnum('storage_provider'),
@@ -340,6 +341,7 @@ export const mediaAssets = pgTable('media_assets', {
   createdAt: timestamp('created_at').defaultNow(),
 }, (table) => ({
   profileIdx: index('media_assets_profile_idx').on(table.profileId),
+  profileVisibleIdx: index('media_assets_profile_visible_idx').on(table.profileId, table.galleryVisible),
   sourceIdx: index('media_assets_source_idx').on(table.sourceType),
   storageKeyIdx: uniqueIndex('media_assets_storage_key_idx').on(table.storageKey),
 }));

@@ -6,7 +6,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, count, desc, eq, inArray } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '@/database/schema';
 import { DATABASE_CONNECTION } from '@/database/database.module';
@@ -25,6 +25,7 @@ import { SubscriptionsService } from '@/modules/subscriptions/subscriptions.serv
 export class MediaService {
   private static readonly FREE_GALLERY_LIMIT = 2;
   private static readonly PREMIUM_GALLERY_LIMIT = 20;
+  private static readonly PREMIUM_MONTHLY_UPLOAD_LIMIT = 100;
 
   constructor(
     @Inject(DATABASE_CONNECTION)
@@ -40,9 +41,13 @@ export class MediaService {
     );
   }
 
-  private normalizeAsset(asset: typeof mediaAssets.$inferSelect) {
+  private normalizeAsset(
+    asset: typeof mediaAssets.$inferSelect,
+    usageCount = 0,
+  ) {
     return {
       id: asset.id,
+      galleryVisible: asset.galleryVisible,
       sourceType: asset.sourceType,
       mediaType: asset.mediaType,
       mimeType: asset.mimeType,
@@ -55,6 +60,8 @@ export class MediaService {
           : asset.originalUrl,
       storageKey: asset.storageKey,
       createdAt: asset.createdAt,
+      isAttached: usageCount > 0,
+      attachmentCount: usageCount,
     };
   }
 
@@ -86,6 +93,9 @@ export class MediaService {
       maxAssets: isPremium
         ? MediaService.PREMIUM_GALLERY_LIMIT
         : MediaService.FREE_GALLERY_LIMIT,
+      monthlyUploadLimit: isPremium
+        ? MediaService.PREMIUM_MONTHLY_UPLOAD_LIMIT
+        : 0,
     };
   }
 
@@ -93,7 +103,12 @@ export class MediaService {
     const result = await this.db
       .select({ count: count() })
       .from(mediaAssets)
-      .where(eq(mediaAssets.profileId, profileId));
+      .where(
+        and(
+          eq(mediaAssets.profileId, profileId),
+          eq(mediaAssets.galleryVisible, true),
+        ),
+      );
 
     const currentCount = Number(result[0]?.count ?? 0);
     if (currentCount >= maxAssets) {
@@ -103,17 +118,59 @@ export class MediaService {
     }
   }
 
+  private async assertMonthlyUploadCapacity(profileId: string, maxUploads: number) {
+    const result = await this.db
+      .select({ count: count() })
+      .from(mediaAssets)
+      .where(
+        and(
+          eq(mediaAssets.profileId, profileId),
+          eq(mediaAssets.sourceType, 'uploaded'),
+          sql<boolean>`${mediaAssets.createdAt} >= date_trunc('month', now())`,
+        ),
+      );
+
+    const currentCount = Number(result[0]?.count ?? 0);
+    if (currentCount >= maxUploads) {
+      throw new BadRequestException(
+        `Monthly upload limit reached. Max uploads this month: ${maxUploads}`,
+      );
+    }
+  }
+
   async listGallery(profileId: string) {
     const policy = await this.getGalleryPolicy(profileId);
     const items = await this.db.query.mediaAssets.findMany({
-      where: eq(mediaAssets.profileId, profileId),
+      where: and(
+        eq(mediaAssets.profileId, profileId),
+        eq(mediaAssets.galleryVisible, true),
+      ),
       orderBy: [desc(mediaAssets.createdAt)],
     });
 
+    const assetIds = items.map((item) => item.id);
+    const usageRows =
+      assetIds.length > 0
+        ? await this.db
+            .select({
+              mediaAssetId: commentAttachments.mediaAssetId,
+              count: count(),
+            })
+            .from(commentAttachments)
+            .where(inArray(commentAttachments.mediaAssetId, assetIds))
+            .groupBy(commentAttachments.mediaAssetId)
+        : [];
+    const usageMap = new Map(
+      usageRows.map((row) => [row.mediaAssetId, Number(row.count)]),
+    );
+
     return {
-      items: items.map((item) => this.normalizeAsset(item)),
+      items: items.map((item) =>
+        this.normalizeAsset(item, usageMap.get(item.id) ?? 0),
+      ),
       maxAssets: policy.maxAssets,
       canUpload: policy.isPremium,
+      monthlyUploadLimit: policy.monthlyUploadLimit,
     };
   }
 
@@ -136,6 +193,7 @@ export class MediaService {
       .insert(mediaAssets)
       .values({
         profileId,
+        galleryVisible: true,
         sourceType: 'external',
         mediaType: dto.mediaType,
         originalUrl: dto.originalUrl,
@@ -151,6 +209,10 @@ export class MediaService {
     await this.assertPremiumUploadAccess(profileId);
     const policy = await this.getGalleryPolicy(profileId);
     await this.assertGalleryCapacity(profileId, policy.maxAssets);
+    await this.assertMonthlyUploadCapacity(
+      profileId,
+      policy.monthlyUploadLimit,
+    );
 
     if (!this.isAllowedMimeType(dto.mimeType)) {
       throw new BadRequestException('Unsupported file type');
@@ -166,6 +228,7 @@ export class MediaService {
       .insert(mediaAssets)
       .values({
         profileId,
+        galleryVisible: true,
         sourceType: 'uploaded',
         mediaType: dto.mediaType,
         storageProvider:
@@ -202,6 +265,15 @@ export class MediaService {
     });
 
     if (attachment) {
+      if (asset.sourceType === 'external') {
+        await this.db
+          .update(mediaAssets)
+          .set({ galleryVisible: false })
+          .where(eq(mediaAssets.id, assetId));
+
+        return { success: true, detachedFromGallery: true };
+      }
+
       throw new ConflictException(
         'Cannot delete a media asset that is attached to a comment',
       );
@@ -224,6 +296,7 @@ export class MediaService {
     const items = await this.db.query.mediaAssets.findMany({
       where: and(
         eq(mediaAssets.profileId, profileId),
+        eq(mediaAssets.galleryVisible, true),
         inArray(mediaAssets.id, assetIds),
       ),
     });
