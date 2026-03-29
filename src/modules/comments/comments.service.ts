@@ -267,7 +267,7 @@ export class CommentsService {
       await this.mediaService.getOwnedAssets(profileId, attachmentIds);
     }
 
-    return this.db.transaction(async (tx) => {
+    const createdCommentId = await this.db.transaction(async (tx) => {
       const [comment] = await tx
         .insert(comments)
         .values({
@@ -289,8 +289,15 @@ export class CommentsService {
         );
       }
 
-      return this.findById(comment.id, profileId);
+      return comment.id;
     });
+
+    const createdComment = await this.findById(createdCommentId, profileId);
+    if (!createdComment) {
+      throw new NotFoundException('Created comment could not be loaded');
+    }
+
+    return createdComment;
   }
 
   async findById(id: string, viewerProfileId?: string | null) {
