@@ -6,7 +6,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, count, desc, eq, inArray } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '@/database/schema';
 import { DATABASE_CONNECTION } from '@/database/database.module';
@@ -23,6 +23,9 @@ import { SubscriptionsService } from '@/modules/subscriptions/subscriptions.serv
 
 @Injectable()
 export class MediaService {
+  private static readonly FREE_GALLERY_LIMIT = 2;
+  private static readonly PREMIUM_GALLERY_LIMIT = 20;
+
   constructor(
     @Inject(DATABASE_CONNECTION)
     private readonly db: NodePgDatabase<typeof schema>,
@@ -56,26 +59,52 @@ export class MediaService {
   }
 
   private async assertPremiumUploadAccess(profileId: string) {
-    const summary =
-      await this.subscriptionsService.getProfileSubscriptionSummary(profileId);
-    const currentPeriodEnd = summary.currentPeriodEnd
-      ? new Date(summary.currentPeriodEnd)
-      : null;
-    const hasPremium =
-      summary.plan === 'premium' &&
-      !!currentPeriodEnd &&
-      Number.isFinite(currentPeriodEnd.getTime()) &&
-      currentPeriodEnd.getTime() > Date.now() &&
-      ['active', 'canceling', 'past_due'].includes(summary.status);
+    const { isPremium } = await this.getGalleryPolicy(profileId);
 
-    if (!hasPremium) {
+    if (!isPremium) {
       throw new ForbiddenException(
         'Only users with active premium can upload files',
       );
     }
   }
 
+  private async getGalleryPolicy(profileId: string) {
+    const summary =
+      await this.subscriptionsService.getProfileSubscriptionSummary(profileId);
+    const currentPeriodEnd = summary.currentPeriodEnd
+      ? new Date(summary.currentPeriodEnd)
+      : null;
+    const isPremium =
+      summary.plan === 'premium' &&
+      !!currentPeriodEnd &&
+      Number.isFinite(currentPeriodEnd.getTime()) &&
+      currentPeriodEnd.getTime() > Date.now() &&
+      ['active', 'canceling', 'past_due'].includes(summary.status);
+
+    return {
+      isPremium,
+      maxAssets: isPremium
+        ? MediaService.PREMIUM_GALLERY_LIMIT
+        : MediaService.FREE_GALLERY_LIMIT,
+    };
+  }
+
+  private async assertGalleryCapacity(profileId: string, maxAssets: number) {
+    const result = await this.db
+      .select({ count: count() })
+      .from(mediaAssets)
+      .where(eq(mediaAssets.profileId, profileId));
+
+    const currentCount = Number(result[0]?.count ?? 0);
+    if (currentCount >= maxAssets) {
+      throw new BadRequestException(
+        `Gallery limit reached. Max allowed assets: ${maxAssets}`,
+      );
+    }
+  }
+
   async listGallery(profileId: string) {
+    const policy = await this.getGalleryPolicy(profileId);
     const items = await this.db.query.mediaAssets.findMany({
       where: eq(mediaAssets.profileId, profileId),
       orderBy: [desc(mediaAssets.createdAt)],
@@ -83,10 +112,15 @@ export class MediaService {
 
     return {
       items: items.map((item) => this.normalizeAsset(item)),
+      maxAssets: policy.maxAssets,
+      canUpload: policy.isPremium,
     };
   }
 
   async registerExternal(profileId: string, dto: RegisterExternalMediaDto) {
+    const policy = await this.getGalleryPolicy(profileId);
+    await this.assertGalleryCapacity(profileId, policy.maxAssets);
+
     let parsedUrl: URL;
     try {
       parsedUrl = new URL(dto.originalUrl);
@@ -115,6 +149,8 @@ export class MediaService {
 
   async createUploadSession(profileId: string, dto: CreateUploadSessionDto) {
     await this.assertPremiumUploadAccess(profileId);
+    const policy = await this.getGalleryPolicy(profileId);
+    await this.assertGalleryCapacity(profileId, policy.maxAssets);
 
     if (!this.isAllowedMimeType(dto.mimeType)) {
       throw new BadRequestException('Unsupported file type');
