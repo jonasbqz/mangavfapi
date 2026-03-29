@@ -10,15 +10,18 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateCommentDto {
   @ApiProperty({ example: 1, description: 'ID del comic' })
+  @Type(() => Number)
   @IsInt()
   comicId: number;
 
   @ApiPropertyOptional({ example: 1, description: 'ID del capítulo (opcional)' })
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   chapterId?: number;
 
@@ -63,12 +66,14 @@ export class GetCommentsQueryDto {
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   limit?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(0)
   offset?: number;
