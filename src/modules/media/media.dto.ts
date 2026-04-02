@@ -9,6 +9,7 @@ import {
   MinLength,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 
 export class RegisterExternalMediaDto {
   @ApiProperty({ enum: ['image', 'gif', 'sticker'] })
@@ -49,6 +50,7 @@ export class CreateUploadSessionDto {
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(20 * 1024 * 1024)
@@ -56,12 +58,39 @@ export class CreateUploadSessionDto {
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   width?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  height?: number;
+}
+
+export class ProxyUploadMediaDto {
+  @ApiProperty({ enum: ['image', 'gif', 'sticker'] })
+  @IsEnum(['image', 'gif', 'sticker'])
+  mediaType: 'image' | 'gif' | 'sticker';
+
+  @ApiProperty()
+  @IsString()
+  @MinLength(1)
+  fileName: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  width?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   height?: number;

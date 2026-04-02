@@ -3,10 +3,14 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   Param,
   Post,
+  Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
+import { FastifyRequest } from 'fastify';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '@/modules/auth/auth.guard';
 import { ProfileGuard } from '@/modules/auth/profile.guard';
@@ -14,6 +18,7 @@ import { CurrentUser, UserSession } from '@/modules/auth/current-user.decorator'
 import { MediaService } from './media.service';
 import {
   CreateUploadSessionDto,
+  ProxyUploadMediaDto,
   RegisterExternalMediaDto,
 } from './media.dto';
 
@@ -46,6 +51,22 @@ export class MediaController {
     @Body() dto: CreateUploadSessionDto,
   ) {
     return this.mediaService.createUploadSession(user.profileId!, dto);
+  }
+
+  @Post('upload')
+  @ApiOperation({ summary: 'Upload media through backend proxy for premium users' })
+  async uploadMedia(
+    @CurrentUser() user: UserSession,
+    @Query() dto: ProxyUploadMediaDto,
+    @Req() request: FastifyRequest,
+    @Headers('content-type') contentType?: string,
+  ) {
+    return this.mediaService.uploadViaProxy(
+      user.profileId!,
+      dto,
+      ((request as any).rawBody ?? request.body) as Buffer | undefined,
+      contentType,
+    );
   }
 
   @Delete(':id')

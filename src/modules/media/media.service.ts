@@ -17,6 +17,7 @@ import {
 import { StorageService } from './storage.service';
 import {
   CreateUploadSessionDto,
+  ProxyUploadMediaDto,
   RegisterExternalMediaDto,
 } from './media.dto';
 import { SubscriptionsService } from '@/modules/subscriptions/subscriptions.service';
@@ -26,6 +27,7 @@ export class MediaService {
   private static readonly FREE_GALLERY_LIMIT = 2;
   private static readonly PREMIUM_GALLERY_LIMIT = 20;
   private static readonly PREMIUM_MONTHLY_UPLOAD_LIMIT = 100;
+  private static readonly MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 
   constructor(
     @Inject(DATABASE_CONNECTION)
@@ -249,6 +251,65 @@ export class MediaService {
       uploadHeaders,
       asset: this.normalizeAsset(asset),
     };
+  }
+
+  async uploadViaProxy(
+    profileId: string,
+    dto: ProxyUploadMediaDto,
+    fileBuffer: Buffer | undefined,
+    mimeType?: string,
+  ) {
+    await this.assertPremiumUploadAccess(profileId);
+    const policy = await this.getGalleryPolicy(profileId);
+    await this.assertGalleryCapacity(profileId, policy.maxAssets);
+    await this.assertMonthlyUploadCapacity(
+      profileId,
+      policy.monthlyUploadLimit,
+    );
+
+    const normalizedMimeType = mimeType?.split(';')[0]?.trim() || undefined;
+
+    if (!fileBuffer || fileBuffer.length === 0) {
+      throw new BadRequestException('File body is required');
+    }
+
+    if (fileBuffer.length > MediaService.MAX_UPLOAD_BYTES) {
+      throw new BadRequestException('File exceeds the 20MB upload limit');
+    }
+
+    if (!this.isAllowedMimeType(normalizedMimeType)) {
+      throw new BadRequestException('Unsupported file type');
+    }
+
+    const storageKey = this.storageService.createStorageKey(
+      profileId,
+      dto.fileName,
+    );
+
+    await this.storageService.uploadObject(
+      storageKey,
+      fileBuffer,
+      normalizedMimeType,
+    );
+
+    const [asset] = await this.db
+      .insert(mediaAssets)
+      .values({
+        profileId,
+        galleryVisible: true,
+        sourceType: 'uploaded',
+        mediaType: dto.mediaType,
+        storageProvider:
+          (process.env.STORAGE_PROVIDER as 's3' | 'r2' | undefined) || 's3',
+        storageKey,
+        mimeType: normalizedMimeType,
+        sizeBytes: fileBuffer.length,
+        width: dto.width,
+        height: dto.height,
+      })
+      .returning();
+
+    return this.normalizeAsset(asset);
   }
 
   async deleteAsset(profileId: string, assetId: string) {

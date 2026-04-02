@@ -181,6 +181,88 @@ export class StorageService {
     };
   }
 
+  async uploadObject(
+    storageKey: string,
+    body: Buffer,
+    mimeType?: string | null,
+  ) {
+    const {
+      endpoint,
+      bucket,
+      region,
+      accessKeyId,
+      secretAccessKey,
+    } = this.getConfig();
+    const now = new Date();
+    const amzDate = toAmzDate(now);
+    const dateStamp = toDateStamp(now);
+    const host = endpoint.host;
+    const canonicalUri = this.buildCanonicalUri(bucket, storageKey);
+    const credentialScope = `${dateStamp}/${region}/s3/aws4_request`;
+    const payloadHash = createHash('sha256').update(body).digest('hex');
+    const normalizedMimeType = mimeType?.trim() || null;
+    const canonicalHeaders = [
+      normalizedMimeType ? `content-type:${normalizedMimeType}\n` : null,
+      `host:${host}\n`,
+      `x-amz-content-sha256:${payloadHash}\n`,
+      `x-amz-date:${amzDate}\n`,
+    ]
+      .filter(Boolean)
+      .join('');
+    const signedHeaders = [
+      normalizedMimeType ? 'content-type' : null,
+      'host',
+      'x-amz-content-sha256',
+      'x-amz-date',
+    ]
+      .filter(Boolean)
+      .join(';');
+
+    const canonicalRequest = [
+      'PUT',
+      canonicalUri,
+      '',
+      canonicalHeaders,
+      signedHeaders,
+      payloadHash,
+    ].join('\n');
+
+    const stringToSign = [
+      'AWS4-HMAC-SHA256',
+      amzDate,
+      credentialScope,
+      hashSha256(canonicalRequest),
+    ].join('\n');
+
+    const signingKey = this.getSignatureKey(secretAccessKey, dateStamp, region);
+    const signature = createHmac('sha256', signingKey)
+      .update(stringToSign)
+      .digest('hex');
+
+    const authorization = [
+      'AWS4-HMAC-SHA256 Credential=',
+      `${accessKeyId}/${credentialScope}, `,
+      `SignedHeaders=${signedHeaders}, `,
+      `Signature=${signature}`,
+    ].join('');
+
+    const response = await fetch(`${endpoint.protocol}//${host}${canonicalUri}`, {
+      method: 'PUT',
+      headers: {
+        ...(normalizedMimeType ? { 'content-type': normalizedMimeType } : {}),
+        host,
+        'x-amz-content-sha256': payloadHash,
+        'x-amz-date': amzDate,
+        Authorization: authorization,
+      },
+      body,
+    });
+
+    if (!response.ok) {
+      throw new InternalServerErrorException('Failed to upload object to storage');
+    }
+  }
+
   async deleteObject(storageKey: string) {
     const {
       endpoint,

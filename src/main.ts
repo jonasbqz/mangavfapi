@@ -49,7 +49,10 @@ async function handleBetterAuth(
 async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
-    new FastifyAdapter({ trustProxy: true }),
+    new FastifyAdapter({
+      trustProxy: true,
+      bodyLimit: 25 * 1024 * 1024,
+    }),
     { rawBody: true },
   );
 
@@ -66,6 +69,17 @@ async function bootstrap() {
   // Register better-auth handler for all auth routes using onRequest hook
   const authHandler = toNodeHandler(auth);
   const fastifyInstance = app.getHttpAdapter().getInstance();
+
+  fastifyInstance.addContentTypeParser(
+    /^image\/.+$/i,
+    { parseAs: 'buffer' },
+    (request, body, done) => done(null, body),
+  );
+  fastifyInstance.addContentTypeParser(
+    'application/octet-stream',
+    { parseAs: 'buffer' },
+    (request, body, done) => done(null, body),
+  );
 
   // Use onRequest hook to intercept all /api/auth/* requests before routing
   fastifyInstance.addHook('onRequest', async (request, reply) => {
