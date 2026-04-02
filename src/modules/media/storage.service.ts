@@ -7,6 +7,10 @@ import { ConfigService } from '@nestjs/config';
 import { createHash, createHmac, randomUUID } from 'crypto';
 
 type StorageProvider = 's3' | 'r2';
+type PresignedUploadOptions = {
+  expiresInSeconds?: number;
+  mimeType?: string | null;
+};
 
 function toAmzDate(date: Date) {
   return date.toISOString().replace(/[:-]|\.\d{3}/g, '');
@@ -83,6 +87,24 @@ export class StorageService {
       .join('&');
   }
 
+  private buildSignedUploadHeaders(host: string, mimeType?: string | null) {
+    const normalizedMimeType = mimeType?.trim() || null;
+
+    if (!normalizedMimeType) {
+      return {
+        signedHeaders: 'host',
+        canonicalHeaders: `host:${host}\n`,
+        uploadHeaders: {} as Record<string, string>,
+      };
+    }
+
+    return {
+      signedHeaders: 'content-type;host',
+      canonicalHeaders: `content-type:${normalizedMimeType}\nhost:${host}\n`,
+      uploadHeaders: { 'Content-Type': normalizedMimeType },
+    };
+  }
+
   buildPublicUrl(storageKey: string) {
     try {
       const { endpoint, bucket, publicBaseUrl } = this.getConfig();
@@ -104,7 +126,7 @@ export class StorageService {
     return `comments/${profileId}/${datePath}/${randomUUID()}-${sanitizedName}`;
   }
 
-  createUploadUrl(storageKey: string, expiresInSeconds = 900) {
+  createUploadUrl(storageKey: string, options: PresignedUploadOptions = {}) {
     const {
       endpoint,
       bucket,
@@ -112,18 +134,23 @@ export class StorageService {
       accessKeyId,
       secretAccessKey,
     } = this.getConfig();
+    const expiresInSeconds = options.expiresInSeconds ?? 900;
     const now = new Date();
     const amzDate = toAmzDate(now);
     const dateStamp = toDateStamp(now);
     const host = endpoint.host;
     const canonicalUri = this.buildCanonicalUri(bucket, storageKey);
     const credentialScope = `${dateStamp}/${region}/s3/aws4_request`;
+    const { signedHeaders, canonicalHeaders, uploadHeaders } =
+      this.buildSignedUploadHeaders(host, options.mimeType);
     const query: Record<string, string> = {
       'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',
+      'X-Amz-Content-Sha256': 'UNSIGNED-PAYLOAD',
       'X-Amz-Credential': `${accessKeyId}/${credentialScope}`,
       'X-Amz-Date': amzDate,
       'X-Amz-Expires': String(expiresInSeconds),
-      'X-Amz-SignedHeaders': 'host',
+      'X-Amz-SignedHeaders': signedHeaders,
+      'x-id': 'PutObject',
     };
 
     const canonicalQueryString = this.buildCanonicalQuery(query);
@@ -131,8 +158,8 @@ export class StorageService {
       'PUT',
       canonicalUri,
       canonicalQueryString,
-      `host:${host}\n`,
-      'host',
+      canonicalHeaders,
+      signedHeaders,
       'UNSIGNED-PAYLOAD',
     ].join('\n');
 
@@ -148,7 +175,10 @@ export class StorageService {
       .update(stringToSign)
       .digest('hex');
 
-    return `${endpoint.protocol}//${host}${canonicalUri}?${canonicalQueryString}&X-Amz-Signature=${signature}`;
+    return {
+      uploadUrl: `${endpoint.protocol}//${host}${canonicalUri}?${canonicalQueryString}&X-Amz-Signature=${signature}`,
+      uploadHeaders,
+    };
   }
 
   async deleteObject(storageKey: string) {

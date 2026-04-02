@@ -222,7 +222,10 @@ export class MediaService {
       profileId,
       dto.fileName,
     );
-    const uploadUrl = this.storageService.createUploadUrl(storageKey);
+    const { uploadUrl, uploadHeaders } = this.storageService.createUploadUrl(
+      storageKey,
+      { mimeType: dto.mimeType },
+    );
 
     const [asset] = await this.db
       .insert(mediaAssets)
@@ -243,6 +246,7 @@ export class MediaService {
 
     return {
       uploadUrl,
+      uploadHeaders,
       asset: this.normalizeAsset(asset),
     };
   }
