@@ -245,6 +245,7 @@ export class StorageService {
       `SignedHeaders=${signedHeaders}, `,
       `Signature=${signature}`,
     ].join('');
+    const requestBody = new Uint8Array(body);
 
     const response = await fetch(`${endpoint.protocol}//${host}${canonicalUri}`, {
       method: 'PUT',
@@ -255,7 +256,7 @@ export class StorageService {
         'x-amz-date': amzDate,
         Authorization: authorization,
       },
-      body,
+      body: requestBody,
     });
 
     if (!response.ok) {
