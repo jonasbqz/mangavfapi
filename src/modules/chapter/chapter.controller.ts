@@ -43,6 +43,21 @@ export class ChapterController {
     private routeProtectionService: RouteProtectionService,
   ) {}
 
+  private parseBatchIds(ids?: string): number[] {
+    if (!ids) {
+      return [];
+    }
+
+    return Array.from(
+      new Set(
+        ids
+          .split(',')
+          .map((value) => Number.parseInt(value.trim(), 10))
+          .filter((value) => Number.isInteger(value) && value > 0),
+      ),
+    );
+  }
+
   private async buildChapterResponse(navigation: Awaited<ReturnType<ChapterService['getNavigation']>>) {
     const chapter = navigation.current;
     const comic = chapter.comicScan?.comic;
@@ -175,6 +190,40 @@ export class ChapterController {
       request.headers,
     );
     return this.buildChapterLookupResponse(nav);
+  }
+
+  @Get('lookup/batch')
+  @ApiOperation({ summary: 'Resolve chapter paths by ids without incrementing views' })
+  @ApiQuery({
+    name: 'ids',
+    required: true,
+    description: 'Comma-separated chapter ids',
+  })
+  async lookupBatch(
+    @Query('ids') ids: string,
+    @Req() request: FastifyRequest,
+  ) {
+    const chapterIds = this.parseBatchIds(ids);
+
+    const results = await Promise.all(
+      chapterIds.map(async (id) => {
+        try {
+          const navigation = await this.chapterService.getNavigation(id);
+          await this.routeProtectionService.assertLegacyAccess(
+            navigation.current.comicScan?.comic,
+            request.headers,
+          );
+          const payload = await this.buildChapterLookupResponse(navigation);
+          return payload.data;
+        } catch {
+          return null;
+        }
+      }),
+    );
+
+    return {
+      data: results.filter(Boolean),
+    };
   }
 
   @Get('route/:comicSegment/:chapterSegment')

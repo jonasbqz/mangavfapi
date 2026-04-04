@@ -23,6 +23,21 @@ export class ComicController {
     private routeProtectionService: RouteProtectionService,
   ) {}
 
+  private parseBatchIds(ids?: string): number[] {
+    if (!ids) {
+      return [];
+    }
+
+    return Array.from(
+      new Set(
+        ids
+          .split(',')
+          .map((value) => Number.parseInt(value.trim(), 10))
+          .filter((value) => Number.isInteger(value) && value > 0),
+      ),
+    );
+  }
+
   @Get()
   @ApiOperation({ summary: 'Get all comics with filters' })
   @ApiQuery({ name: 'search', required: false })
@@ -160,6 +175,39 @@ export class ComicController {
     const comic = await this.comicService.findLookupById(id);
     await this.routeProtectionService.assertLegacyAccess(comic, request.headers);
     return comic;
+  }
+
+  @Get('lookup/batch')
+  @ApiOperation({ summary: 'Resolve comic paths by ids without incrementing views' })
+  @ApiQuery({
+    name: 'ids',
+    required: true,
+    description: 'Comma-separated comic ids',
+  })
+  async lookupBatch(
+    @Query('ids') ids: string,
+    @Req() request: FastifyRequest,
+  ) {
+    const comicIds = this.parseBatchIds(ids);
+
+    const results = await Promise.all(
+      comicIds.map(async (id) => {
+        try {
+          const comic = await this.comicService.findLookupById(id);
+          await this.routeProtectionService.assertLegacyAccess(
+            comic,
+            request.headers,
+          );
+          return comic;
+        } catch {
+          return null;
+        }
+      }),
+    );
+
+    return {
+      data: results.filter(Boolean),
+    };
   }
 
   @Get('route/:segment')
