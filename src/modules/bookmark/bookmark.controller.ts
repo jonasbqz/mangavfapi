@@ -21,7 +21,7 @@ import { RouteProtectionService } from '@/modules/route-protection/route-protect
 
 @ApiTags('Bookmarks')
 @Controller('bookmarks')
-@UseGuards(AuthGuard, ProfileGuard, VerifiedEmailGuard)
+@UseGuards(AuthGuard, ProfileGuard)
 @ApiBearerAuth()
 export class BookmarkController {
   constructor(
@@ -44,6 +44,7 @@ export class BookmarkController {
   }
 
   @Post()
+  @UseGuards(VerifiedEmailGuard)
   @ApiOperation({ summary: 'Create or update bookmark' })
   async upsert(
     @CurrentUser() user: UserSession,
@@ -91,6 +92,7 @@ export class BookmarkController {
   }
 
   @Put(':comicId')
+  @UseGuards(VerifiedEmailGuard)
   @ApiOperation({ summary: 'Update bookmark' })
   async update(
     @CurrentUser() user: UserSession,
@@ -102,6 +104,7 @@ export class BookmarkController {
   }
 
   @Delete(':comicId')
+  @UseGuards(VerifiedEmailGuard)
   @ApiOperation({ summary: 'Delete bookmark' })
   async delete(
     @CurrentUser() user: UserSession,

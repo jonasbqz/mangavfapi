@@ -20,7 +20,7 @@ import { RouteProtectionService } from '@/modules/route-protection/route-protect
 
 @ApiTags('Reading History')
 @Controller('reading-history')
-@UseGuards(AuthGuard, ProfileGuard, VerifiedEmailGuard)
+@UseGuards(AuthGuard, ProfileGuard)
 @ApiBearerAuth()
 export class ReadingHistoryController {
   constructor(
@@ -56,6 +56,7 @@ export class ReadingHistoryController {
   }
 
   @Post()
+  @UseGuards(VerifiedEmailGuard)
   @ApiOperation({ summary: 'Record reading progress' })
   async record(
     @CurrentUser() user: UserSession,
@@ -114,6 +115,7 @@ export class ReadingHistoryController {
   }
 
   @Delete(':id')
+  @UseGuards(VerifiedEmailGuard)
   @ApiOperation({ summary: 'Delete reading history entry' })
   async delete(
     @CurrentUser() user: UserSession,
