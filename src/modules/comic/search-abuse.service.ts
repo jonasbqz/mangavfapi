@@ -73,11 +73,23 @@ export class SearchAbuseService {
     const client = store?.client;
 
     if (client) {
-      const count = await client.incr(key);
-      if (count === 1) {
-        await client.pexpire(key, ttlMs);
+      try {
+        // Pipeline atómica: INCR + PEXPIRE en un solo round-trip
+        // Elimina el race condition entre ambas operaciones y falla rápido si Redis está offline
+        const pipeline = client.pipeline();
+        pipeline.incr(key);
+        pipeline.pexpire(key, ttlMs);
+        const results = await pipeline.exec();
+        // results[0] = [error, count], results[1] = [error, pexpireResult]
+        const incrError = results?.[0]?.[0];
+        if (incrError) {
+          throw incrError;
+        }
+        return (results?.[0]?.[1] as number) ?? 1;
+      } catch {
+        // Redis offline o error transitorio — caemos al fallback in-memory
+        // para no tirar 500 a todos los usuarios
       }
-      return count;
     }
 
     const current = Number((await this.cacheService.get<number>(key)) || 0) + 1;
