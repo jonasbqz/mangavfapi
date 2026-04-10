@@ -74,18 +74,14 @@ export class SearchAbuseService {
 
     if (client) {
       try {
-        // Pipeline atómica: INCR + PEXPIRE en un solo round-trip
-        // Elimina el race condition entre ambas operaciones y falla rápido si Redis está offline
-        const pipeline = client.pipeline();
-        pipeline.incr(key);
-        pipeline.pexpire(key, ttlMs);
-        const results = await pipeline.exec();
-        // results[0] = [error, count], results[1] = [error, pexpireResult]
-        const incrError = results?.[0]?.[0];
-        if (incrError) {
-          throw incrError;
+        const count = await client.incr(key);
+        // Solo se setea el TTL cuando la key es nueva (count === 1)
+        // Si se llama pexpire en cada request se convierte en sliding window
+        // y el contador nunca expira → bloquea usuarios legítimos indefinidamente
+        if (count === 1) {
+          await client.pexpire(key, ttlMs);
         }
-        return (results?.[0]?.[1] as number) ?? 1;
+        return count;
       } catch {
         // Redis offline o error transitorio — caemos al fallback in-memory
         // para no tirar 500 a todos los usuarios
