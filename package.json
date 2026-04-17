@@ -28,7 +28,7 @@
     "@nestjs/swagger": "^7.4.0",
     "@types/javascript-obfuscator": "^0.17.0",
     "@types/sanitize-html": "^2.16.0",
-    "axios": "^1.7.0",
+    "axios": "^1.15.0",
     "better-auth": "^1.2.0",
     "cache-manager": "^5.4.0",
     "cache-manager-ioredis-yet": "^2.1.0",
