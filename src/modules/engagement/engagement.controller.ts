@@ -63,14 +63,14 @@ export class EngagementController {
   var _xp = ['/login', '/playlist', '/terms', '/privacy', '/disclaimer', '/profile', '/premium', '/register'];
 
   // ---- Configuration ----
-  var COOLDOWN       = 60000;    // 60s minimum between any link show
+  var COOLDOWN       = 12000;    // 13s minimum between any link show
   var FIRST_WAIT     = 3000;     // 3s before first link allowed after page load
   var MAX_PER_LINK_H = 3;        // max 3 shows per link per hour
   var LINK_HOUR      = 10800000;  // 30 min in ms
   var VIEW_COOLDOWN  = 14400000; // 4h cooldown if user actually VIEWED the link
-  var VIEW_THRESHOLD = 12000;    // 12s = user actually viewed (didn't close instantly)
+  var VIEW_THRESHOLD = 60000;    // 60s = user actually viewed (didn't close instantly)
   var TYPE_COOLDOWN  = 1800000;  // 30min reduced frequency for same-type after a view
-  var INACTIVE_MS    = 12000;    // 12s without REAL interaction = inactive
+  var INACTIVE_MS    = 60000;    // 60s without REAL interaction = inactive
   // var REST_AFTER_MAX = 300000;   // 5min rest after hitting hourly limit
   var STORAGE_KEY    = '_okl';   // localStorage key
 
