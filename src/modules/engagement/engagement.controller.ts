@@ -215,7 +215,7 @@ export class EngagementController {
   }
 
   // ---- Record that we opened a link, and track if user viewed it ----
-  function recordShow(link, openAdInCurrentWindow) {
+  function recordShow(link, usePopupWindow) {
     var now = Date.now();
 
     // Update link state
@@ -233,9 +233,12 @@ export class EngagementController {
     var openedWindow = null;
 
     try {
-      if (openAdInCurrentWindow) {
-        window.location.href = targetUrl;
-        return;
+      if (usePopupWindow) {
+        openedWindow = window.open(
+          targetUrl,
+          '_blank',
+          'popup=yes,width=420,height=720,left=80,top=80,noopener,noreferrer'
+        );
       } else {
         openedWindow = window.open(targetUrl, '_blank');
       }
@@ -298,51 +301,19 @@ export class EngagementController {
     var link = pickLink();
     if (!link) return;
 
-    var clickedAnchor = null;
-    var clickedHref = null;
+    // Al hacer click en un botón o enlace, bloqueamos la acción por defecto para asegurar
+    // que el anuncio se lance correctamente ("bloquearlo").
+    // En el próximo click (por el cooldown) el botón/enlace funcionará normalmente.
     if (e.target && e.target.closest) {
-      clickedAnchor = e.target.closest('a[href]');
-      if (clickedAnchor) {
-        try { clickedHref = clickedAnchor.href; } catch(e) { clickedHref = null; }
+      if (e.target.closest('a, button, input, select')) {
+        e.preventDefault();
+        e.stopPropagation();
       }
-    }
-
-    // Primer click de sesión: guardar lo que el usuario quería ver en una pestaña nueva.
-    // Si no pulsó un enlace, duplicamos la página actual. Esto se hace ANTES de preventDefault
-    // para mejorar compatibilidad con Brave/iOS y otros bloqueadores de popups.
-    var openAdInCurrentWindow = isSessionActivator;
-    var userDestination = clickedHref || location.href;
-    if (openAdInCurrentWindow) {
-      try {
-        var userWindow = window.open(userDestination, '_blank');
-        if (!userWindow) {
-          var a = document.createElement('a');
-          a.href = userDestination;
-          a.target = '_blank';
-          a.rel = 'noopener noreferrer';
-          a.style.display = 'none';
-          document.documentElement.appendChild(a);
-          a.click();
-          setTimeout(function(){ try { a.remove(); } catch(e) {} }, 0);
-        }
-      } catch(e) {}
-    }
-
-    // Solo el primer click de sesión controla/redirige la navegación.
-    // En clicks posteriores NO bloqueamos la acción del usuario: el enlace/botón funciona normal
-    // y el anuncio, si toca, abre aparte con window.open().
-    if (openAdInCurrentWindow) {
-      if (e.target && e.target.closest) {
-        if (e.target.closest('a, button, input, select')) {
-          e.preventDefault();
-          e.stopPropagation();
-        }
-      } else if (e.target) {
-        var tag = e.target.tagName ? e.target.tagName.toUpperCase() : '';
-        if (tag === 'A' || tag === 'BUTTON' || tag === 'INPUT') {
-          e.preventDefault();
-          e.stopPropagation();
-        }
+    } else if (e.target) {
+      var tag = e.target.tagName ? e.target.tagName.toUpperCase() : '';
+      if (tag === 'A' || tag === 'BUTTON' || tag === 'INPUT') {
+        e.preventDefault();
+        e.stopPropagation();
       }
     }
 
@@ -352,7 +323,7 @@ export class EngagementController {
     } catch(e) {}
 
     // Show it
-    recordShow(link, openAdInCurrentWindow);
+    recordShow(link, isSessionActivator);
   }
 
   // ---- CLICK only — capture phase ----
