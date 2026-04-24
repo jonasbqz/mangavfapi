@@ -63,7 +63,7 @@ export class EngagementController {
   var _xp = ['/login', '/playlist', '/terms', '/privacy', '/disclaimer', '/profile', '/premium', '/register'];
 
   // ---- Configuration ----
-  var COOLDOWN       = 12000;    // 13s minimum between any link show
+  var COOLDOWN       = 60000;    // 60s minimum between any link show
   var FIRST_WAIT     = 3000;     // 3s before first link allowed after page load
   var MAX_PER_LINK_H = 3;        // max 3 shows per link per hour
   var LINK_HOUR      = 10800000;  // 30 min in ms
