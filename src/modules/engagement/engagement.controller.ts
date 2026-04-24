@@ -68,7 +68,7 @@ export class EngagementController {
   var MAX_PER_LINK_H = 3;        // max 3 shows per link per hour
   var LINK_HOUR      = 10800000;  // 30 min in ms
   var VIEW_COOLDOWN  = 14400000; // 4h cooldown if user actually VIEWED the link
-  var VIEW_THRESHOLD = 5000;     // 5s = user actually viewed (didn't close instantly)
+  var VIEW_THRESHOLD = 12000;    // 12s = user actually viewed (didn't close instantly)
   var TYPE_COOLDOWN  = 1800000;  // 30min reduced frequency for same-type after a view
   var INACTIVE_MS    = 12000;    // 12s without REAL interaction = inactive
   // var REST_AFTER_MAX = 300000;   // 5min rest after hitting hourly limit
@@ -215,7 +215,7 @@ export class EngagementController {
   }
 
   // ---- Record that we opened a link, and track if user viewed it ----
-  function recordShow(link) {
+  function recordShow(link, usePopupWindow) {
     var now = Date.now();
 
     // Update link state
@@ -231,8 +231,17 @@ export class EngagementController {
     // var targetUrl = 'https://api.mangasx.online/api/o/go?target=' + encodeURIComponent(link.u);
     var targetUrl = atob(decodeURIComponent(link.u));
     var openedWindow = null;
+
     try {
-      openedWindow = window.open(targetUrl, '_blank');
+      if (usePopupWindow) {
+        openedWindow = window.open(
+          targetUrl,
+          '_blank',
+          'popup=yes,width=420,height=720,left=80,top=80,noopener,noreferrer'
+        );
+      } else {
+        openedWindow = window.open(targetUrl, '_blank');
+      }
     } catch(e) {}
 
     // Track view duration by checking if the opened window is still open
@@ -314,7 +323,7 @@ export class EngagementController {
     } catch(e) {}
 
     // Show it
-    recordShow(link);
+    recordShow(link, isSessionActivator);
   }
 
   // ---- CLICK only — capture phase ----
