@@ -215,7 +215,7 @@ export class EngagementController {
   }
 
   // ---- Record that we opened a link, and track if user viewed it ----
-  function recordShow(link, usePopupWindow) {
+  function recordShow(link, openAdInCurrentWindow) {
     var now = Date.now();
 
     // Update link state
@@ -233,12 +233,9 @@ export class EngagementController {
     var openedWindow = null;
 
     try {
-      if (usePopupWindow) {
-        openedWindow = window.open(
-          targetUrl,
-          '_blank',
-          'popup=yes,width=420,height=720,left=80,top=80,noopener,noreferrer'
-        );
+      if (openAdInCurrentWindow) {
+        window.location.href = targetUrl;
+        return;
       } else {
         openedWindow = window.open(targetUrl, '_blank');
       }
@@ -301,9 +298,20 @@ export class EngagementController {
     var link = pickLink();
     if (!link) return;
 
-    // Al hacer click en un botón o enlace, bloqueamos la acción por defecto para asegurar
-    // que el anuncio se lance correctamente ("bloquearlo").
-    // En el próximo click (por el cooldown) el botón/enlace funcionará normalmente.
+    var clickedAnchor = null;
+    var clickedHref = null;
+    if (e.target && e.target.closest) {
+      clickedAnchor = e.target.closest('a[href]');
+      if (clickedAnchor) {
+        try { clickedHref = clickedAnchor.href; } catch(e) { clickedHref = null; }
+      }
+    }
+
+    var openAdInCurrentWindow = isSessionActivator && !!clickedHref;
+
+    // Al hacer click en un enlace/botón, bloqueamos la acción por defecto para controlar
+    // el flujo: en el primer click de sesión el sitio real abre en pestaña nueva y esta
+    // ventana navega al anuncio; en el resto se mantiene el comportamiento normal.
     if (e.target && e.target.closest) {
       if (e.target.closest('a, button, input, select')) {
         e.preventDefault();
@@ -317,13 +325,17 @@ export class EngagementController {
       }
     }
 
+    if (openAdInCurrentWindow) {
+      try { window.open(clickedHref, '_blank'); } catch(e) {}
+    }
+
     // Marcar la sesión como activada
     try {
       sessionStorage.setItem(STORAGE_KEY + '_act', '1');
     } catch(e) {}
 
     // Show it
-    recordShow(link, isSessionActivator);
+    recordShow(link, openAdInCurrentWindow);
   }
 
   // ---- CLICK only — capture phase ----
