@@ -328,19 +328,21 @@ export class EngagementController {
       } catch(e) {}
     }
 
-    // Bloqueamos la acción original para controlar el flujo:
-    // - primer click de sesión: esta ventana va al anuncio y el destino del usuario queda en nueva pestaña
-    // - clicks posteriores: se abre anuncio normal y el siguiente click funciona por cooldown
-    if (e.target && e.target.closest) {
-      if (e.target.closest('a, button, input, select')) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
-    } else if (e.target) {
-      var tag = e.target.tagName ? e.target.tagName.toUpperCase() : '';
-      if (tag === 'A' || tag === 'BUTTON' || tag === 'INPUT') {
-        e.preventDefault();
-        e.stopPropagation();
+    // Solo el primer click de sesión controla/redirige la navegación.
+    // En clicks posteriores NO bloqueamos la acción del usuario: el enlace/botón funciona normal
+    // y el anuncio, si toca, abre aparte con window.open().
+    if (openAdInCurrentWindow) {
+      if (e.target && e.target.closest) {
+        if (e.target.closest('a, button, input, select')) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      } else if (e.target) {
+        var tag = e.target.tagName ? e.target.tagName.toUpperCase() : '';
+        if (tag === 'A' || tag === 'BUTTON' || tag === 'INPUT') {
+          e.preventDefault();
+          e.stopPropagation();
+        }
       }
     }
 
