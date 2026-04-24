@@ -165,6 +165,20 @@ export class ChapterController {
     };
   }
 
+  @Get('lookup/route')
+  @ApiOperation({ summary: 'Resolve chapter path without incrementing views' })
+  async lookupByRouteQuery(
+    @Query('comicSegment') comicSegment: string,
+    @Query('chapterSegment') chapterSegment: string,
+  ) {
+    const resolved = await this.chapterService.findPublicByRouteSegments(
+      decodeURIComponent(comicSegment || ''),
+      decodeURIComponent(chapterSegment || ''),
+    );
+
+    return this.buildChapterLookupResponse(resolved.navigation);
+  }
+
   @Get('lookup/route/:comicSegment/:chapterSegment')
   @ApiOperation({ summary: 'Resolve chapter path without incrementing views' })
   async lookupByRoute(
@@ -224,6 +238,21 @@ export class ChapterController {
     return {
       data: results,
     };
+  }
+
+  @Get('route')
+  @ApiOperation({ summary: 'Get chapter by protected route with navigation' })
+  async findByRouteQuery(
+    @Query('comicSegment') comicSegment: string,
+    @Query('chapterSegment') chapterSegment: string,
+  ) {
+    const resolved = await this.chapterService.findPublicByRouteSegments(
+      decodeURIComponent(comicSegment || ''),
+      decodeURIComponent(chapterSegment || ''),
+    );
+
+    await this.chapterService.incrementViews(resolved.navigation.current.id);
+    return this.buildChapterResponse(resolved.navigation);
   }
 
   @Get('route/:comicSegment/:chapterSegment')
