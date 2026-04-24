@@ -67,13 +67,16 @@ export class ReadingHistoryController {
   @Get()
   @ApiOperation({ summary: 'Get full reading history' })
   @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'offset', required: false, type: Number })
   async findAll(
     @CurrentUser() user: UserSession,
     @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
   ) {
     const entries = await this.readingHistoryService.findAll(
       user.profileId!,
       limit ? parseInt(limit, 10) : 50,
+      offset ? parseInt(offset, 10) : 0,
     );
     return Promise.all(entries.map((entry) => this.enrichEntry(entry)));
   }
@@ -81,15 +84,51 @@ export class ReadingHistoryController {
   @Get('recent')
   @ApiOperation({ summary: 'Get recent reading history' })
   @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'offset', required: false, type: Number })
   async findRecent(
     @CurrentUser() user: UserSession,
     @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
   ) {
     const entries = await this.readingHistoryService.findRecent(
       user.profileId!,
       limit ? parseInt(limit, 10) : 10,
+      offset ? parseInt(offset, 10) : 0,
     );
     return Promise.all(entries.map((entry) => this.enrichEntry(entry)));
+  }
+
+  @Get('comics')
+  @ApiOperation({ summary: 'Get reading history grouped by comic' })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'offset', required: false, type: Number })
+  @ApiQuery({ name: 'chaptersLimit', required: false, type: Number })
+  async findGroupedByComic(
+    @CurrentUser() user: UserSession,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('chaptersLimit') chaptersLimit?: string,
+  ) {
+    const result = await this.readingHistoryService.findGroupedByComic(
+      user.profileId!,
+      limit ? parseInt(limit, 10) : 20,
+      offset ? parseInt(offset, 10) : 0,
+      chaptersLimit ? parseInt(chaptersLimit, 10) : 4,
+    );
+
+    const items = await Promise.all(
+      result.items.map(async (item) => ({
+        ...item,
+        entries: await Promise.all(
+          item.entries.map((entry) => this.enrichEntry(entry)),
+        ),
+      })),
+    );
+
+    return {
+      ...result,
+      items,
+    };
   }
 
   @Get('comic/:comicId')
