@@ -14,6 +14,21 @@ import { auth } from './lib/auth';
 import { toNodeHandler } from 'better-auth/node';
 import { getRequestClientIp } from './common/network/client-ip';
 
+function parseJsonBody(body: Buffer, done: (error: Error | null, body?: unknown) => void) {
+  const rawBody = body.toString('utf8').trim();
+
+  if (!rawBody) {
+    done(null, {});
+    return;
+  }
+
+  try {
+    done(null, JSON.parse(rawBody));
+  } catch (error) {
+    done(error instanceof Error ? error : new Error('Invalid JSON body'));
+  }
+}
+
 // Helper function to handle better-auth requests using raw Node.js response
 async function handleBetterAuth(
   request: FastifyRequest,
@@ -67,6 +82,14 @@ async function bootstrap() {
       bodyLimit: 25 * 1024 * 1024,
     }),
     { rawBody: true },
+  );
+
+  (app.getHttpAdapter() as unknown as FastifyAdapter).useBodyParser(
+    'application/json',
+    true,
+    { bodyLimit: 25 * 1024 * 1024 },
+    (_request: FastifyRequest, body: Buffer, done: (error: Error | null, body?: unknown) => void) =>
+      parseJsonBody(body, done),
   );
 
   // Register cookie plugin for better-auth sessions
