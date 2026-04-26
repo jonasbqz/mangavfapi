@@ -92,24 +92,37 @@ export function buildSubscriptionSummary(
   },
   now = new Date(),
 ): SubscriptionSummary {
-  const currentPeriodEnd = profile.stripeCurrentPeriodEnd || profile.premiumExpireAt;
   const hasRemoteSubscription = !!profile.stripeSubscriptionId;
   const storedSource = profile.premiumSource ?? null;
   const stripeStatus = profile.stripeSubscriptionStatus || null;
-  const currentPeriodEndDate = currentPeriodEnd ? new Date(currentPeriodEnd) : null;
-  const hasValidCurrentPeriodEnd =
-    !!currentPeriodEndDate && Number.isFinite(currentPeriodEndDate.getTime());
-  const hasActiveAccessWindow =
-    hasValidCurrentPeriodEnd && currentPeriodEndDate!.getTime() > now.getTime();
+  const stripePeriodEnd = profile.stripeCurrentPeriodEnd ?? null;
+  const manualPeriodEnd = profile.premiumExpireAt ?? null;
+  const fallbackPeriodEnd = stripePeriodEnd || manualPeriodEnd;
+  const fallbackPeriodEndDate = fallbackPeriodEnd ? new Date(fallbackPeriodEnd) : null;
+  const hasValidFallbackPeriodEnd =
+    !!fallbackPeriodEndDate && Number.isFinite(fallbackPeriodEndDate.getTime());
   const provider: SubscriptionSummary['provider'] =
     storedSource === 'stripe' || (!storedSource && hasRemoteSubscription)
       ? 'stripe'
       : storedSource === 'manual'
         ? 'manual'
-        : profile.plan === 'premium' || hasValidCurrentPeriodEnd
+        : profile.plan === 'premium' || hasValidFallbackPeriodEnd
           ? 'legacy'
           : 'manual';
   const isManualOrLegacyProvider = provider === 'manual' || provider === 'legacy';
+  const currentPeriodEnd =
+    provider === 'stripe'
+      ? stripePeriodEnd || manualPeriodEnd
+      : manualPeriodEnd || stripePeriodEnd;
+  const currentPeriodStart =
+    provider === 'stripe'
+      ? profile.stripeCurrentPeriodStart || profile.premiumStartedAt
+      : profile.premiumStartedAt || profile.stripeCurrentPeriodStart;
+  const currentPeriodEndDate = currentPeriodEnd ? new Date(currentPeriodEnd) : null;
+  const hasValidCurrentPeriodEnd =
+    !!currentPeriodEndDate && Number.isFinite(currentPeriodEndDate.getTime());
+  const hasActiveAccessWindow =
+    hasValidCurrentPeriodEnd && currentPeriodEndDate!.getTime() > now.getTime();
 
   let status: SubscriptionStatus = 'basic';
 
@@ -169,11 +182,11 @@ export function buildSubscriptionSummary(
     startedAt: profile.premiumStartedAt
       ? new Date(profile.premiumStartedAt).toISOString()
       : null,
-    currentPeriodStart: profile.stripeCurrentPeriodStart
-      ? new Date(profile.stripeCurrentPeriodStart).toISOString()
+    currentPeriodStart: currentPeriodStart
+      ? new Date(currentPeriodStart).toISOString()
       : null,
     currentPeriodEnd: currentPeriodEnd ? new Date(currentPeriodEnd).toISOString() : null,
-    cancelAtPeriodEnd: Boolean(profile.stripeCancelAtPeriodEnd),
+    cancelAtPeriodEnd: provider === 'stripe' && Boolean(profile.stripeCancelAtPeriodEnd),
     canceledAt: profile.stripeCanceledAt
       ? new Date(profile.stripeCanceledAt).toISOString()
       : null,
