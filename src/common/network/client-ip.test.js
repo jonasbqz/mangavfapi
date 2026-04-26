@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  appendForwardedClientHeaders,
   extractClientIpFromHeaders,
   getRequestClientIp,
 } from './client-ip';
@@ -20,6 +21,28 @@ describe('client-ip helpers', () => {
         'cf-connecting-ip': '198.51.100.25',
       }),
     ).toBe('198.51.100.25');
+  });
+
+  it('skips Cloudflare proxy IPs and uses the first public forwarded client', () => {
+    expect(
+      extractClientIpFromHeaders({
+        'cf-connecting-ip': '172.68.230.159',
+        'x-forwarded-for': '45.5.10.20, 172.68.230.159, 10.0.0.1',
+      }),
+    ).toBe('45.5.10.20');
+  });
+
+  it('normalizes forwarded headers passed to downstream auth handlers', () => {
+    const headers = appendForwardedClientHeaders(
+      new Headers(),
+      {
+        'cf-connecting-ip': '172.68.230.159',
+        'x-forwarded-for': '45.5.10.20, 172.68.230.159',
+      },
+    );
+
+    expect(headers.get('cf-connecting-ip')).toBe('45.5.10.20');
+    expect(headers.get('x-real-ip')).toBe('45.5.10.20');
   });
 
   it('normalizes ipv4 addresses with ports', () => {

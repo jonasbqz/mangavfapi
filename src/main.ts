@@ -12,6 +12,7 @@ import { SanitizePipe } from './common/pipes';
 import { SanitizeInterceptor } from './common/interceptors';
 import { auth } from './lib/auth';
 import { toNodeHandler } from 'better-auth/node';
+import { getRequestClientIp } from './common/network/client-ip';
 
 // Helper function to handle better-auth requests using raw Node.js response
 async function handleBetterAuth(
@@ -22,10 +23,22 @@ async function handleBetterAuth(
   // Hijack the reply to take full control
   reply.hijack();
 
+  const clientIp = getRequestClientIp(request);
   const nodeReq = {
     method: request.method,
     url: `${request.protocol}://${request.hostname}${request.url}`,
-    headers: request.headers,
+    headers: {
+      ...request.headers,
+      ...(clientIp
+        ? {
+            'x-forwarded-for': clientIp,
+            'x-real-ip': clientIp,
+            'x-client-ip': clientIp,
+            'cf-connecting-ip': clientIp,
+            'true-client-ip': clientIp,
+          }
+        : {}),
+    },
     body: request.body,
   };
 
