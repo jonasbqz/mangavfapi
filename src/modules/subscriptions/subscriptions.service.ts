@@ -505,12 +505,12 @@ export class SubscriptionsService {
   async cancelSubscriptionAtPeriodEnd(profileId: string): Promise<SubscriptionSummary> {
     const profile = await this.getProfileById(profileId);
 
-    if (profile.premiumSource !== 'stripe' || !profile.stripeSubscriptionId) {
+    if (!this.canManageStripeSubscription(profile)) {
       throw new BadRequestException('No active Stripe subscription found');
     }
 
     const subscription = await this.updateStripeSubscription(
-      profile.stripeSubscriptionId,
+      profile.stripeSubscriptionId!,
       new URLSearchParams({
         cancel_at_period_end: 'true',
       }),
@@ -523,12 +523,12 @@ export class SubscriptionsService {
   async reactivateSubscription(profileId: string): Promise<SubscriptionSummary> {
     const profile = await this.getProfileById(profileId);
 
-    if (profile.premiumSource !== 'stripe' || !profile.stripeSubscriptionId) {
+    if (!this.canManageStripeSubscription(profile)) {
       throw new BadRequestException('No active Stripe subscription found');
     }
 
     const subscription = await this.updateStripeSubscription(
-      profile.stripeSubscriptionId,
+      profile.stripeSubscriptionId!,
       new URLSearchParams({
         cancel_at_period_end: 'false',
       }),
@@ -541,7 +541,7 @@ export class SubscriptionsService {
   async takeOverStripeSubscription(profileId: string): Promise<SubscriptionSummary> {
     const profile = await this.getProfileById(profileId);
 
-    if (profile.premiumSource !== 'stripe') {
+    if (!this.canTakeOverStripeSubscription(profile)) {
       throw new BadRequestException('Only Stripe-managed subscriptions can be taken over');
     }
 
@@ -579,7 +579,7 @@ export class SubscriptionsService {
   async resyncProfileSubscription(profileId: string): Promise<SubscriptionSummary> {
     const profile = await this.getProfileById(profileId);
 
-    if (profile.premiumSource !== 'stripe') {
+    if (!this.canTakeOverStripeSubscription(profile)) {
       return buildSubscriptionSummary(profile);
     }
 
@@ -685,6 +685,20 @@ export class SubscriptionsService {
     return (
       profile.premiumSource === 'manual' ||
       (profile.premiumSource === null && profile.plan === 'premium')
+    );
+  }
+
+  private canManageStripeSubscription(profile: ProfileRecord) {
+    return (
+      Boolean(profile.stripeSubscriptionId) &&
+      profile.premiumSource !== 'manual'
+    );
+  }
+
+  private canTakeOverStripeSubscription(profile: ProfileRecord) {
+    return (
+      profile.premiumSource === 'stripe' ||
+      this.canManageStripeSubscription(profile)
     );
   }
 
