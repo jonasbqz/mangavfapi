@@ -4,9 +4,15 @@ import { ChapterController } from './chapter.controller';
 import { ChapterService } from './chapter.service';
 import { ComicModule } from '../comic/comic.module';
 import { RouteProtectionModule } from '../route-protection/route-protection.module';
+import { TrafficEventsModule } from '../traffic/traffic-events.module';
 
 @Module({
-  imports: [forwardRef(() => ComicModule), JwtDownloadModule, RouteProtectionModule],
+  imports: [
+    forwardRef(() => ComicModule),
+    JwtDownloadModule,
+    RouteProtectionModule,
+    TrafficEventsModule,
+  ],
   controllers: [ChapterController],
   providers: [ChapterService],
   exports: [ChapterService],

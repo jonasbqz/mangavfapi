@@ -243,6 +243,38 @@ export const readingHistory = pgTable('reading_history', {
   readAtIdx: index('reading_history_read_at_idx').on(table.readAt),
 }));
 
+// Traffic Events - raw learning signals for suspicious bot/datacenter behavior.
+// This is intentionally text/json driven so we can evolve detection rules without
+// destructive enum migrations while we learn from production traffic.
+export const trafficEvents = pgTable('traffic_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  occurredAt: timestamp('occurred_at').defaultNow().notNull(),
+  eventType: text('event_type').notNull(),
+  action: text('action').notNull().default('allow'),
+  subjectKey: text('subject_key').notNull(),
+  clientIp: varchar('client_ip', { length: 64 }),
+  clientAsn: integer('client_asn'),
+  userAgent: text('user_agent'),
+  path: text('path'),
+  method: varchar('method', { length: 16 }),
+  referer: text('referer'),
+  acceptLanguage: text('accept_language'),
+  userId: text('user_id'),
+  searchQuery: text('search_query'),
+  entityType: text('entity_type'),
+  entityId: integer('entity_id'),
+  riskScore: integer('risk_score').default(0).notNull(),
+  reasons: jsonb('reasons').$type<string[]>().default(sql`'[]'::jsonb`).notNull(),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().default(sql`'{}'::jsonb`).notNull(),
+}, (table) => ({
+  occurredAtIdx: index('traffic_events_occurred_at_idx').on(table.occurredAt),
+  subjectOccurredAtIdx: index('traffic_events_subject_occurred_idx').on(table.subjectKey, table.occurredAt),
+  clientIpOccurredAtIdx: index('traffic_events_client_ip_occurred_idx').on(table.clientIp, table.occurredAt),
+  clientAsnOccurredAtIdx: index('traffic_events_client_asn_occurred_idx').on(table.clientAsn, table.occurredAt),
+  eventTypeOccurredAtIdx: index('traffic_events_event_type_occurred_idx').on(table.eventType, table.occurredAt),
+  riskScoreOccurredAtIdx: index('traffic_events_risk_score_occurred_idx').on(table.riskScore, table.occurredAt),
+}));
+
 // Likes - Para trackear qué usuario dio like a qué comic
 export const likes = pgTable('likes', {
   id: uuid('id').primaryKey().defaultRandom(),

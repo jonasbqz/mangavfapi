@@ -22,6 +22,7 @@ import { SubscriptionsModule } from './modules/subscriptions/subscriptions.modul
 import { RouteProtectionModule } from './modules/route-protection/route-protection.module';
 import { EntityReactionsModule } from './modules/entity-reactions/entity-reactions.module';
 import { MediaModule } from './modules/media/media.module';
+import { TrafficEventsModule } from './modules/traffic/traffic-events.module';
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -50,6 +51,7 @@ import { MediaModule } from './modules/media/media.module';
     RouteProtectionModule,
     EntityReactionsModule,
     MediaModule,
+    TrafficEventsModule,
   ],
 })
 export class AppModule {}

@@ -23,6 +23,7 @@ import type * as schema from '@/database/schema';
 import type { FastifyRequest } from 'fastify';
 import { JwtDownloadService } from '../jwt-download/jwt-download.service';
 import { RouteProtectionService } from '../route-protection/route-protection.service';
+import { TrafficEventsService } from '../traffic/traffic-events.service';
 
 /** Allowed count values for the bulk next-chapters endpoint */
 const ALLOWED_COUNTS = [5, 10, 25, 50] as const;
@@ -42,7 +43,18 @@ export class ChapterController {
     private db: NodePgDatabase<typeof schema>,
     private jwtDownloadService: JwtDownloadService,
     private routeProtectionService: RouteProtectionService,
+    private trafficEventsService: TrafficEventsService,
   ) {}
+
+  private recordTrafficEvent(
+    request: FastifyRequest | undefined,
+    input: Omit<Parameters<TrafficEventsService['record']>[0], 'request'>,
+  ) {
+    if (!request) return;
+    void this.trafficEventsService.record({ ...input, request }).catch(() => {
+      // Traffic learning must never break chapter delivery.
+    });
+  }
 
   private parseBatchIds(ids?: string): number[] {
     if (!ids) {
@@ -170,7 +182,16 @@ export class ChapterController {
   async lookupByRouteQuery(
     @Query('comicSegment') comicSegment: string,
     @Query('chapterSegment') chapterSegment: string,
+    @Req() request: FastifyRequest,
   ) {
+    this.recordTrafficEvent(request, {
+      eventType: 'chapter_lookup',
+      entityType: 'chapter',
+      metadata: {
+        comicSegment: decodeURIComponent(comicSegment || ''),
+        chapterSegment: decodeURIComponent(chapterSegment || ''),
+      },
+    });
     const resolved = await this.chapterService.findPublicByRouteSegments(
       decodeURIComponent(comicSegment || ''),
       decodeURIComponent(chapterSegment || ''),
@@ -184,7 +205,16 @@ export class ChapterController {
   async lookupByRoute(
     @Param('comicSegment') comicSegment: string,
     @Param('chapterSegment') chapterSegment: string,
+    @Req() request: FastifyRequest,
   ) {
+    this.recordTrafficEvent(request, {
+      eventType: 'chapter_lookup',
+      entityType: 'chapter',
+      metadata: {
+        comicSegment: decodeURIComponent(comicSegment),
+        chapterSegment: decodeURIComponent(chapterSegment),
+      },
+    });
     const resolved = await this.chapterService.findPublicByRouteSegments(
       decodeURIComponent(comicSegment),
       decodeURIComponent(chapterSegment),
@@ -199,6 +229,11 @@ export class ChapterController {
     @Param('id', ParseIntPipe) id: number,
     @Req() request: FastifyRequest,
   ) {
+    this.recordTrafficEvent(request, {
+      eventType: 'chapter_lookup',
+      entityType: 'chapter',
+      entityId: id,
+    });
     const nav = await this.chapterService.getNavigation(id);
     await this.routeProtectionService.assertLegacyAccess(
       nav.current.comicScan?.comic,
@@ -245,6 +280,7 @@ export class ChapterController {
   async findByRouteQuery(
     @Query('comicSegment') comicSegment: string,
     @Query('chapterSegment') chapterSegment: string,
+    @Req() request: FastifyRequest,
   ) {
     const resolved = await this.chapterService.findPublicByRouteSegments(
       decodeURIComponent(comicSegment || ''),
@@ -252,6 +288,16 @@ export class ChapterController {
     );
 
     await this.chapterService.incrementViews(resolved.navigation.current.id);
+    this.recordTrafficEvent(request, {
+      eventType: 'chapter_view',
+      entityType: 'chapter',
+      entityId: resolved.navigation.current.id,
+      metadata: {
+        comicId: resolved.navigation.current.comicScan?.comic?.id || null,
+        comicSegment: decodeURIComponent(comicSegment || ''),
+        chapterSegment: decodeURIComponent(chapterSegment || ''),
+      },
+    });
     return this.buildChapterResponse(resolved.navigation);
   }
 
@@ -260,6 +306,7 @@ export class ChapterController {
   async findByRoute(
     @Param('comicSegment') comicSegment: string,
     @Param('chapterSegment') chapterSegment: string,
+    @Req() request: FastifyRequest,
   ) {
     const resolved = await this.chapterService.findPublicByRouteSegments(
       decodeURIComponent(comicSegment),
@@ -267,6 +314,16 @@ export class ChapterController {
     );
 
     await this.chapterService.incrementViews(resolved.navigation.current.id);
+    this.recordTrafficEvent(request, {
+      eventType: 'chapter_view',
+      entityType: 'chapter',
+      entityId: resolved.navigation.current.id,
+      metadata: {
+        comicId: resolved.navigation.current.comicScan?.comic?.id || null,
+        comicSegment: decodeURIComponent(comicSegment),
+        chapterSegment: decodeURIComponent(chapterSegment),
+      },
+    });
     return this.buildChapterResponse(resolved.navigation);
   }
 
@@ -282,6 +339,14 @@ export class ChapterController {
       request.headers,
     );
     await this.chapterService.incrementViews(id);
+    this.recordTrafficEvent(request, {
+      eventType: 'chapter_view',
+      entityType: 'chapter',
+      entityId: id,
+      metadata: {
+        comicId: nav.current.comicScan?.comic?.id || null,
+      },
+    });
     return this.buildChapterResponse(nav);
   }
 
@@ -303,6 +368,15 @@ export class ChapterController {
     if (chapter.copyrighted) {
       return { pages: [], copyrighted: true };
     }
+    this.recordTrafficEvent(request, {
+      eventType: 'chapter_pages',
+      entityType: 'chapter',
+      entityId: id,
+      metadata: {
+        comicId: nav.current.comicScan?.comic?.id || null,
+        pageCount: Array.isArray(chapter.urlPages) ? chapter.urlPages.length : 0,
+      },
+    });
     return {
       data: {
         id: chapter.id,

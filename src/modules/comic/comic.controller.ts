@@ -15,6 +15,7 @@ import { AdminGuard } from '@/modules/auth/admin.guard';
 import { RouteProtectionService } from '@/modules/route-protection/route-protection.service';
 import type { FastifyRequest } from 'fastify';
 import { SearchAbuseService } from './search-abuse.service';
+import { TrafficEventsService } from '../traffic/traffic-events.service';
 
 const MAX_LOOKUP_BATCH_IDS = 50;
 
@@ -25,7 +26,18 @@ export class ComicController {
     private comicService: ComicService,
     private routeProtectionService: RouteProtectionService,
     private searchAbuseService: SearchAbuseService,
+    private trafficEventsService: TrafficEventsService,
   ) {}
+
+  private recordTrafficEvent(
+    request: FastifyRequest | undefined,
+    input: Omit<Parameters<TrafficEventsService['record']>[0], 'request'>,
+  ) {
+    if (!request) return;
+    void this.trafficEventsService.record({ ...input, request }).catch(() => {
+      // Traffic learning must never break public content delivery.
+    });
+  }
 
   private parseBatchIds(ids?: string): number[] {
     if (!ids) {
@@ -70,6 +82,14 @@ export class ComicController {
       : { action: 'allow' as const, search: search?.trim() || '' };
 
     if (inspection.action === 'reject') {
+      this.recordTrafficEvent(request, {
+        eventType: inspection.search ? 'comic_search' : 'comic_list',
+        searchQuery: inspection.search || null,
+        action: 'rate_limited',
+        metadata: {
+          searchInspectionAction: inspection.action,
+        },
+      });
       throw this.searchAbuseService.createRateLimitException();
     }
 
@@ -91,11 +111,31 @@ export class ComicController {
     };
 
     if (inspection.action === 'empty') {
+      this.recordTrafficEvent(request, {
+        eventType: 'comic_search',
+        searchQuery: inspection.search,
+        action: 'observe',
+        metadata: {
+          searchInspectionAction: inspection.action,
+        },
+      });
       return this.comicService.buildEmptySearchResponse(
         filters.page,
         filters.limit,
       );
     }
+
+    this.recordTrafficEvent(request, {
+      eventType: inspection.search ? 'comic_search' : 'comic_list',
+      searchQuery: inspection.search || null,
+      metadata: {
+        page: filters.page,
+        limit: filters.limit,
+        orderBy: filters.orderBy,
+        genres: filters.genreNames,
+        searchInspectionAction: inspection.action,
+      },
+    });
 
     return this.comicService.findAll(filters);
   }
@@ -185,7 +225,15 @@ export class ComicController {
 
   @Get('lookup/route')
   @ApiOperation({ summary: 'Resolve comic path without incrementing views' })
-  async lookupByRouteQuery(@Query('segment') segment: string) {
+  async lookupByRouteQuery(
+    @Query('segment') segment: string,
+    @Req() request: FastifyRequest,
+  ) {
+    this.recordTrafficEvent(request, {
+      eventType: 'comic_lookup',
+      entityType: 'comic',
+      metadata: { segment: decodeURIComponent(segment || '') },
+    });
     return this.comicService.findLookupByRouteSegment(
       decodeURIComponent(segment || ''),
     );
@@ -193,7 +241,15 @@ export class ComicController {
 
   @Get('lookup/route/:segment')
   @ApiOperation({ summary: 'Resolve comic path without incrementing views' })
-  async lookupByRouteSegment(@Param('segment') segment: string) {
+  async lookupByRouteSegment(
+    @Param('segment') segment: string,
+    @Req() request: FastifyRequest,
+  ) {
+    this.recordTrafficEvent(request, {
+      eventType: 'comic_lookup',
+      entityType: 'comic',
+      metadata: { segment: decodeURIComponent(segment) },
+    });
     return this.comicService.findLookupByRouteSegment(
       decodeURIComponent(segment),
     );
@@ -205,6 +261,11 @@ export class ComicController {
     @Param('id', ParseIntPipe) id: number,
     @Req() request: FastifyRequest,
   ) {
+    this.recordTrafficEvent(request, {
+      eventType: 'comic_lookup',
+      entityType: 'comic',
+      entityId: id,
+    });
     const comic = await this.comicService.findLookupById(id);
     await this.routeProtectionService.assertLegacyAccess(comic, request.headers);
     return comic;
@@ -244,19 +305,37 @@ export class ComicController {
 
   @Get('route')
   @ApiOperation({ summary: 'Get comic by protected route segment' })
-  async findByRouteQuery(@Query('segment') segment: string) {
+  async findByRouteQuery(
+    @Query('segment') segment: string,
+    @Req() request: FastifyRequest,
+  ) {
     const comic = await this.comicService.findPublicByRouteSegment(
       decodeURIComponent(segment || ''),
     );
     await this.comicService.incrementViews(comic.id);
+    this.recordTrafficEvent(request, {
+      eventType: 'comic_view',
+      entityType: 'comic',
+      entityId: comic.id,
+      metadata: { segment: decodeURIComponent(segment || '') },
+    });
     return comic;
   }
 
   @Get('route/:segment')
   @ApiOperation({ summary: 'Get comic by protected route segment' })
-  async findByRouteSegment(@Param('segment') segment: string) {
+  async findByRouteSegment(
+    @Param('segment') segment: string,
+    @Req() request: FastifyRequest,
+  ) {
     const comic = await this.comicService.findPublicByRouteSegment(decodeURIComponent(segment));
     await this.comicService.incrementViews(comic.id);
+    this.recordTrafficEvent(request, {
+      eventType: 'comic_view',
+      entityType: 'comic',
+      entityId: comic.id,
+      metadata: { segment: decodeURIComponent(segment) },
+    });
     return comic;
   }
 
@@ -269,6 +348,11 @@ export class ComicController {
     const comic = await this.comicService.findById(id);
     await this.routeProtectionService.assertLegacyAccess(comic, request.headers);
     await this.comicService.incrementViews(id);
+    this.recordTrafficEvent(request, {
+      eventType: 'comic_view',
+      entityType: 'comic',
+      entityId: id,
+    });
     return comic;
   }
 
@@ -281,6 +365,12 @@ export class ComicController {
     const comic = await this.comicService.findBySlug(slug);
     await this.routeProtectionService.assertLegacyAccess(comic, request.headers);
     await this.comicService.incrementViews(comic.id);
+    this.recordTrafficEvent(request, {
+      eventType: 'comic_view',
+      entityType: 'comic',
+      entityId: comic.id,
+      metadata: { slug },
+    });
     return comic;
   }
 
