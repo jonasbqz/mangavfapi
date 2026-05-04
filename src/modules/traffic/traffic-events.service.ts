@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Interval } from '@nestjs/schedule';
 import type { FastifyRequest } from 'fastify';
@@ -13,6 +13,8 @@ import {
   actionFromRiskScore,
   hashTrafficSubject,
   inspectTrafficEvent,
+  isInternalIp,
+  isIpInAnyCidr,
   parseAsnList,
   parseCsvList,
   TrafficAction,
@@ -62,6 +64,9 @@ const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 export class TrafficEventsService {
   private readonly watchCidrs: string[];
   private readonly watchAsns: number[];
+  private readonly allowCidrs: string[];
+  private readonly allowIps: string[];
+  private readonly allowAsns: number[];
   private tableMissingLogged = false;
 
   constructor(
@@ -80,11 +85,19 @@ export class TrafficEventsService {
         this.configService.get<string>('SUSPICIOUS_ASNS') ||
         this.configService.get<string>('BOT_DATACENTER_ASNS'),
     );
+    this.allowCidrs = parseCsvList(this.configService.get<string>('BOT_ALLOW_IP_CIDRS'));
+    this.allowIps = parseCsvList(this.configService.get<string>('BOT_ALLOW_IPS'));
+    this.allowAsns = parseAsnList(this.configService.get<string>('BOT_ALLOW_ASNS'));
   }
 
   async record(input: RecordTrafficInput) {
     if (this.configService.get<string>('TRAFFIC_EVENTS_ENABLED') === 'false') {
-      return { action: 'allow' as TrafficAction, riskScore: 0, reasons: [] as string[] };
+      return {
+        action: 'allow' as TrafficAction,
+        blocked: false,
+        riskScore: 0,
+        reasons: [] as string[],
+      };
     }
 
     const clientIp = getRequestClientIp(input.request);
@@ -97,6 +110,24 @@ export class TrafficEventsService {
     const subjectSource = clientIp || userAgent || 'unknown';
     const subjectKey = hashTrafficSubject(subjectSource);
 
+    if (clientIp && isInternalIp(clientIp)) {
+      return {
+        action: 'allow' as TrafficAction,
+        blocked: false,
+        riskScore: 0,
+        reasons: ['internal_origin_ip'],
+      };
+    }
+
+    if (this.isAllowedInfrastructure(clientIp, clientAsn)) {
+      return {
+        action: 'allow' as TrafficAction,
+        blocked: false,
+        riskScore: 0,
+        reasons: ['allowed_network'],
+      };
+    }
+
     const staticInspection = inspectTrafficEvent({
       eventType: input.eventType,
       clientIp,
@@ -107,6 +138,9 @@ export class TrafficEventsService {
       userId,
       watchCidrs: this.watchCidrs,
       watchAsns: this.watchAsns,
+      allowCidrs: this.allowCidrs,
+      allowIps: this.allowIps,
+      allowAsns: this.allowAsns,
     });
 
     const counters = await this.inspectCounters({
@@ -123,7 +157,15 @@ export class TrafficEventsService {
     const reasons = Array.from(
       new Set([...staticInspection.reasons, ...counters.reasons]),
     );
-    const action = input.action || actionFromRiskScore(riskScore);
+    const shouldBlock = this.shouldBlockRequest({
+      action: input.action,
+      counters,
+      staticInspection,
+      riskScore,
+    });
+    const action = shouldBlock
+      ? 'rate_limited'
+      : input.action || actionFromRiskScore(riskScore);
 
     const uniquePathHit = await this.trackUniqueValue(
       `traffic:${subjectKey}:paths:10m`,
@@ -159,6 +201,7 @@ export class TrafficEventsService {
         ...input.metadata,
         isAllowedSearchCrawler: staticInspection.isAllowedSearchCrawler,
         isBotLike: staticInspection.isBotLike,
+        blocked: shouldBlock,
         watchedAsns: this.watchAsns,
         counters,
       },
@@ -176,7 +219,76 @@ export class TrafficEventsService {
 
     void this.cleanupOldTrafficData();
 
-    return { action, riskScore, reasons };
+    return { action, blocked: shouldBlock, riskScore, reasons };
+  }
+
+  createBlockedException(): NotFoundException {
+    return new NotFoundException('Not found');
+  }
+
+  private shouldBlockRequest(input: {
+    action?: TrafficAction;
+    counters: CounterSignals;
+    staticInspection: {
+      isAllowedSearchCrawler: boolean;
+      isAllowedNetwork: boolean;
+      isInternalIp: boolean;
+      isWatchlistedDatacenter: boolean;
+    };
+    riskScore: number;
+  }): boolean {
+    if (input.action === 'rate_limited') {
+      return true;
+    }
+
+    if (
+      input.staticInspection.isAllowedSearchCrawler ||
+      input.staticInspection.isAllowedNetwork ||
+      input.staticInspection.isInternalIp
+    ) {
+      return false;
+    }
+
+    if (
+      input.staticInspection.isWatchlistedDatacenter &&
+      this.configService.get<string>('BOT_BLOCK_DATACENTER') !== 'false'
+    ) {
+      return true;
+    }
+
+    if (this.configService.get<string>('BOT_BLOCK_FAST_REQUESTS') === 'false') {
+      return false;
+    }
+
+    const maxRequestsPerMinute = this.readIntConfig('BOT_MAX_REQUESTS_PER_MINUTE', 120);
+    const maxSearchesPerMinute = this.readIntConfig('BOT_MAX_SEARCHES_PER_MINUTE', 30);
+    const maxContentViewsPerMinute = this.readIntConfig('BOT_MAX_CONTENT_VIEWS_PER_MINUTE', 80);
+    const maxUniquePaths10m = this.readIntConfig('BOT_MAX_UNIQUE_PATHS_10M', 80);
+    const maxUniqueSearches10m = this.readIntConfig('BOT_MAX_UNIQUE_SEARCHES_10M', 40);
+
+    return (
+      input.counters.minuteEvents > maxRequestsPerMinute ||
+      input.counters.minuteSearches > maxSearchesPerMinute ||
+      input.counters.minuteContentViews > maxContentViewsPerMinute ||
+      input.counters.uniquePaths10m > maxUniquePaths10m ||
+      input.counters.uniqueSearches10m > maxUniqueSearches10m ||
+      input.riskScore >= 95
+    );
+  }
+
+  private isAllowedInfrastructure(
+    clientIp: string | null,
+    clientAsn: number | null,
+  ): boolean {
+    if (clientIp && this.allowIps.includes(clientIp)) {
+      return true;
+    }
+
+    if (isIpInAnyCidr(clientIp, this.allowCidrs)) {
+      return true;
+    }
+
+    return Boolean(clientAsn && this.allowAsns.includes(clientAsn));
   }
 
   async getRecentEvents(filters: {

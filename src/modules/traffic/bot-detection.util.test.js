@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   actionFromRiskScore,
   inspectTrafficEvent,
+  isInternalIp,
   isIpv4InCidr,
   parseAsnList,
   parseCsvList,
@@ -55,6 +56,26 @@ describe('bot detection util', () => {
     });
 
     expect(result.reasons).toContain('watchlisted_datacenter_asn');
+    expect(result.isWatchlistedDatacenter).toBe(true);
+  });
+
+  it('recognizes private/internal origin IPs', () => {
+    expect(isInternalIp('10.0.1.14')).toBe(true);
+    expect(isInternalIp('172.20.0.10')).toBe(true);
+    expect(isInternalIp('192.168.1.10')).toBe(true);
+    expect(isInternalIp('8.8.8.8')).toBe(false);
+  });
+
+  it('marks explicitly allowed networks', () => {
+    const result = inspectTrafficEvent({
+      eventType: 'comic_view',
+      userAgent: 'Mozilla/5.0',
+      clientIp: '203.0.113.10',
+      allowCidrs: ['203.0.113.0/24'],
+    });
+
+    expect(result.isAllowedNetwork).toBe(true);
+    expect(result.reasons).toContain('allowed_network');
   });
 
   it('matches IPv4 CIDR ranges', () => {

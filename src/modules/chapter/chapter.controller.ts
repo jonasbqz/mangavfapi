@@ -46,14 +46,15 @@ export class ChapterController {
     private trafficEventsService: TrafficEventsService,
   ) {}
 
-  private recordTrafficEvent(
+  private async recordTrafficEvent(
     request: FastifyRequest | undefined,
     input: Omit<Parameters<TrafficEventsService['record']>[0], 'request'>,
-  ) {
+  ): Promise<void> {
     if (!request) return;
-    void this.trafficEventsService.record({ ...input, request }).catch(() => {
-      // Traffic learning must never break chapter delivery.
-    });
+    const decision = await this.trafficEventsService.record({ ...input, request });
+    if (decision.blocked) {
+      throw this.trafficEventsService.createBlockedException();
+    }
   }
 
   private parseBatchIds(ids?: string): number[] {
@@ -184,7 +185,7 @@ export class ChapterController {
     @Query('chapterSegment') chapterSegment: string,
     @Req() request: FastifyRequest,
   ) {
-    this.recordTrafficEvent(request, {
+    await this.recordTrafficEvent(request, {
       eventType: 'chapter_lookup',
       entityType: 'chapter',
       metadata: {
@@ -207,7 +208,7 @@ export class ChapterController {
     @Param('chapterSegment') chapterSegment: string,
     @Req() request: FastifyRequest,
   ) {
-    this.recordTrafficEvent(request, {
+    await this.recordTrafficEvent(request, {
       eventType: 'chapter_lookup',
       entityType: 'chapter',
       metadata: {
@@ -229,7 +230,7 @@ export class ChapterController {
     @Param('id', ParseIntPipe) id: number,
     @Req() request: FastifyRequest,
   ) {
-    this.recordTrafficEvent(request, {
+    await this.recordTrafficEvent(request, {
       eventType: 'chapter_lookup',
       entityType: 'chapter',
       entityId: id,
@@ -288,7 +289,7 @@ export class ChapterController {
     );
 
     await this.chapterService.incrementViews(resolved.navigation.current.id);
-    this.recordTrafficEvent(request, {
+    await this.recordTrafficEvent(request, {
       eventType: 'chapter_view',
       entityType: 'chapter',
       entityId: resolved.navigation.current.id,
@@ -314,7 +315,7 @@ export class ChapterController {
     );
 
     await this.chapterService.incrementViews(resolved.navigation.current.id);
-    this.recordTrafficEvent(request, {
+    await this.recordTrafficEvent(request, {
       eventType: 'chapter_view',
       entityType: 'chapter',
       entityId: resolved.navigation.current.id,
@@ -339,7 +340,7 @@ export class ChapterController {
       request.headers,
     );
     await this.chapterService.incrementViews(id);
-    this.recordTrafficEvent(request, {
+    await this.recordTrafficEvent(request, {
       eventType: 'chapter_view',
       entityType: 'chapter',
       entityId: id,
@@ -368,7 +369,7 @@ export class ChapterController {
     if (chapter.copyrighted) {
       return { pages: [], copyrighted: true };
     }
-    this.recordTrafficEvent(request, {
+    await this.recordTrafficEvent(request, {
       eventType: 'chapter_pages',
       entityType: 'chapter',
       entityId: id,

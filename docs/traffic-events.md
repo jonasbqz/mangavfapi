@@ -50,7 +50,31 @@ Señales de patrón:
 - `TRAFFIC_RAW_THROTTLE_MS=30000`: mínimo entre raw rows del mismo sujeto/tipo/riesgo.
 - `TRAFFIC_RAW_RETENTION_DAYS=2`: retención de evidencia cruda.
 - `TRAFFIC_AGGREGATE_RETENTION_DAYS=30`: retención de rollups por hora.
+- `BOT_BLOCK_DATACENTER=true`: bloquea inmediatamente ASN/CIDR en watchlist, salvo crawlers permitidos o allowlist.
+- `BOT_BLOCK_FAST_REQUESTS=true`: bloquea ráfagas rápidas al momento con 404.
+- `BOT_MAX_REQUESTS_PER_MINUTE=120`: máximo de requests/min por sujeto.
+- `BOT_MAX_SEARCHES_PER_MINUTE=30`: máximo de búsquedas/min por sujeto.
+- `BOT_MAX_CONTENT_VIEWS_PER_MINUTE=80`: máximo de vistas de contenido/min por sujeto.
+- `BOT_MAX_UNIQUE_PATHS_10M=80`: máximo de rutas únicas en 10 min.
+- `BOT_MAX_UNIQUE_SEARCHES_10M=40`: máximo de búsquedas únicas en 10 min.
+- `BOT_ALLOW_IPS`, `BOT_ALLOW_IP_CIDRS`, `BOT_ALLOW_ASNS`: redes de confianza que nunca se bloquean.
 - También se aceptan alias: `SUSPICIOUS_IP_CIDRS`, `BOT_DATACENTER_IP_CIDRS`, `SUSPICIOUS_ASNS` o `BOT_DATACENTER_ASNS`.
+
+## Bloqueo inline
+
+El sistema ya no espera a que el panel muestre eventos: cada request actualiza contadores en Redis y puede devolver 404 inmediatamente cuando:
+
+- el ASN/IP está en watchlist de datacenter (`BOT_WATCH_ASNS`, `BOT_WATCH_IP_CIDRS`);
+- supera umbrales de requests rápidos;
+- supera umbrales de búsquedas rápidas;
+- supera umbrales de vistas rápidas;
+- recorre demasiadas rutas o búsquedas únicas en 10 minutos.
+
+Excepciones:
+
+- crawlers de búsqueda permitidos por user-agent;
+- IPs privadas internas como `10.0.1.14` se ignoran como llamadas de origen/SSR y no se guardan como sujeto;
+- redes configuradas en `BOT_ALLOW_*`.
 
 ## Configuración CDN recomendada
 

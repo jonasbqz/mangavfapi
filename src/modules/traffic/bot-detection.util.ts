@@ -21,11 +21,17 @@ export type TrafficInspectionInput = {
   userId?: string | null;
   watchCidrs?: string[];
   watchAsns?: number[];
+  allowCidrs?: string[];
+  allowIps?: string[];
+  allowAsns?: number[];
 };
 
 export type TrafficInspectionResult = {
   isAllowedSearchCrawler: boolean;
   isBotLike: boolean;
+  isAllowedNetwork: boolean;
+  isWatchlistedDatacenter: boolean;
+  isInternalIp: boolean;
   riskScore: number;
   reasons: string[];
 };
@@ -73,6 +79,37 @@ export function isIpInAnyCidr(ip: string | null | undefined, cidrs: string[] = [
   return cidrs.some((cidr) => cidr && isIpv4InCidr(ip, cidr));
 }
 
+export function isInternalIp(ip: string | null | undefined): boolean {
+  if (!ip) return false;
+  const normalized = ip.toLowerCase();
+  if (
+    normalized === 'localhost' ||
+    normalized === '::1' ||
+    normalized.startsWith('fc') ||
+    normalized.startsWith('fd') ||
+    normalized.startsWith('fe80')
+  ) {
+    return true;
+  }
+
+  const parts = ip.split('.').map((part) => Number.parseInt(part, 10));
+  if (
+    parts.length !== 4 ||
+    parts.some((part) => !Number.isFinite(part) || part < 0 || part > 255)
+  ) {
+    return false;
+  }
+
+  const [a, b] = parts;
+  return (
+    a === 10 ||
+    a === 127 ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 169 && b === 254)
+  );
+}
+
 export function parseCsvList(value?: string | null): string[] {
   return (value || '')
     .split(',')
@@ -102,6 +139,15 @@ export function inspectTrafficEvent(input: TrafficInspectionInput): TrafficInspe
 
   const isAllowedSearchCrawler = ALLOWED_SEARCH_CRAWLER_UA_REGEX.test(userAgent);
   const isBotLike = BOT_LIKE_UA_REGEX.test(userAgent);
+  const isAllowedNetwork = Boolean(
+    (input.clientIp &&
+      (input.allowIps || []).includes(input.clientIp) ||
+      isIpInAnyCidr(input.clientIp, input.allowCidrs)) ||
+      (input.clientAsn &&
+        Array.isArray(input.allowAsns) &&
+        input.allowAsns.includes(input.clientAsn)),
+  );
+  const isInternal = isInternalIp(input.clientIp);
 
   if (!userAgent) {
     riskScore += 15;
@@ -129,6 +175,18 @@ export function inspectTrafficEvent(input: TrafficInspectionInput): TrafficInspe
     reasons.push('watchlisted_datacenter_asn');
   }
 
+  const isWatchlistedDatacenter =
+    reasons.includes('watchlisted_datacenter_ip') ||
+    reasons.includes('watchlisted_datacenter_asn');
+
+  if (isAllowedNetwork) {
+    reasons.push('allowed_network');
+  }
+
+  if (isInternal) {
+    reasons.push('internal_origin_ip');
+  }
+
   if (!input.userId) {
     riskScore += 5;
     reasons.push('anonymous_traffic');
@@ -147,6 +205,9 @@ export function inspectTrafficEvent(input: TrafficInspectionInput): TrafficInspe
   return {
     isAllowedSearchCrawler,
     isBotLike,
+    isAllowedNetwork,
+    isWatchlistedDatacenter,
+    isInternalIp: isInternal,
     riskScore,
     reasons,
   };

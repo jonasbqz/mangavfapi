@@ -29,14 +29,15 @@ export class ComicController {
     private trafficEventsService: TrafficEventsService,
   ) {}
 
-  private recordTrafficEvent(
+  private async recordTrafficEvent(
     request: FastifyRequest | undefined,
     input: Omit<Parameters<TrafficEventsService['record']>[0], 'request'>,
-  ) {
+  ): Promise<void> {
     if (!request) return;
-    void this.trafficEventsService.record({ ...input, request }).catch(() => {
-      // Traffic learning must never break public content delivery.
-    });
+    const decision = await this.trafficEventsService.record({ ...input, request });
+    if (decision.blocked) {
+      throw this.trafficEventsService.createBlockedException();
+    }
   }
 
   private parseBatchIds(ids?: string): number[] {
@@ -82,7 +83,7 @@ export class ComicController {
       : { action: 'allow' as const, search: search?.trim() || '' };
 
     if (inspection.action === 'reject') {
-      this.recordTrafficEvent(request, {
+      await this.recordTrafficEvent(request, {
         eventType: inspection.search ? 'comic_search' : 'comic_list',
         searchQuery: inspection.search || null,
         action: 'rate_limited',
@@ -111,7 +112,7 @@ export class ComicController {
     };
 
     if (inspection.action === 'empty') {
-      this.recordTrafficEvent(request, {
+      await this.recordTrafficEvent(request, {
         eventType: 'comic_search',
         searchQuery: inspection.search,
         action: 'observe',
@@ -125,7 +126,7 @@ export class ComicController {
       );
     }
 
-    this.recordTrafficEvent(request, {
+    await this.recordTrafficEvent(request, {
       eventType: inspection.search ? 'comic_search' : 'comic_list',
       searchQuery: inspection.search || null,
       metadata: {
@@ -229,7 +230,7 @@ export class ComicController {
     @Query('segment') segment: string,
     @Req() request: FastifyRequest,
   ) {
-    this.recordTrafficEvent(request, {
+    await this.recordTrafficEvent(request, {
       eventType: 'comic_lookup',
       entityType: 'comic',
       metadata: { segment: decodeURIComponent(segment || '') },
@@ -245,7 +246,7 @@ export class ComicController {
     @Param('segment') segment: string,
     @Req() request: FastifyRequest,
   ) {
-    this.recordTrafficEvent(request, {
+    await this.recordTrafficEvent(request, {
       eventType: 'comic_lookup',
       entityType: 'comic',
       metadata: { segment: decodeURIComponent(segment) },
@@ -261,7 +262,7 @@ export class ComicController {
     @Param('id', ParseIntPipe) id: number,
     @Req() request: FastifyRequest,
   ) {
-    this.recordTrafficEvent(request, {
+    await this.recordTrafficEvent(request, {
       eventType: 'comic_lookup',
       entityType: 'comic',
       entityId: id,
@@ -313,7 +314,7 @@ export class ComicController {
       decodeURIComponent(segment || ''),
     );
     await this.comicService.incrementViews(comic.id);
-    this.recordTrafficEvent(request, {
+    await this.recordTrafficEvent(request, {
       eventType: 'comic_view',
       entityType: 'comic',
       entityId: comic.id,
@@ -330,7 +331,7 @@ export class ComicController {
   ) {
     const comic = await this.comicService.findPublicByRouteSegment(decodeURIComponent(segment));
     await this.comicService.incrementViews(comic.id);
-    this.recordTrafficEvent(request, {
+    await this.recordTrafficEvent(request, {
       eventType: 'comic_view',
       entityType: 'comic',
       entityId: comic.id,
@@ -348,7 +349,7 @@ export class ComicController {
     const comic = await this.comicService.findById(id);
     await this.routeProtectionService.assertLegacyAccess(comic, request.headers);
     await this.comicService.incrementViews(id);
-    this.recordTrafficEvent(request, {
+    await this.recordTrafficEvent(request, {
       eventType: 'comic_view',
       entityType: 'comic',
       entityId: id,
@@ -365,7 +366,7 @@ export class ComicController {
     const comic = await this.comicService.findBySlug(slug);
     await this.routeProtectionService.assertLegacyAccess(comic, request.headers);
     await this.comicService.incrementViews(comic.id);
-    this.recordTrafficEvent(request, {
+    await this.recordTrafficEvent(request, {
       eventType: 'comic_view',
       entityType: 'comic',
       entityId: comic.id,
