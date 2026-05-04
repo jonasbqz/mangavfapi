@@ -281,6 +281,7 @@ export class ChapterController {
   async findByRouteQuery(
     @Query('comicSegment') comicSegment: string,
     @Query('chapterSegment') chapterSegment: string,
+    @Query('trackView') trackView: string | undefined,
     @Req() request: FastifyRequest,
   ) {
     const resolved = await this.chapterService.findPublicByRouteSegments(
@@ -288,17 +289,21 @@ export class ChapterController {
       decodeURIComponent(chapterSegment || ''),
     );
 
-    await this.chapterService.incrementViews(resolved.navigation.current.id);
+    const shouldTrackView = trackView !== 'false';
     await this.recordTrafficEvent(request, {
-      eventType: 'chapter_view',
+      eventType: shouldTrackView ? 'chapter_view' : 'chapter_lookup',
       entityType: 'chapter',
       entityId: resolved.navigation.current.id,
       metadata: {
         comicId: resolved.navigation.current.comicScan?.comic?.id || null,
         comicSegment: decodeURIComponent(comicSegment || ''),
         chapterSegment: decodeURIComponent(chapterSegment || ''),
+        trackView: shouldTrackView,
       },
     });
+    if (shouldTrackView) {
+      await this.chapterService.incrementViews(resolved.navigation.current.id);
+    }
     return this.buildChapterResponse(resolved.navigation);
   }
 
@@ -307,6 +312,7 @@ export class ChapterController {
   async findByRoute(
     @Param('comicSegment') comicSegment: string,
     @Param('chapterSegment') chapterSegment: string,
+    @Query('trackView') trackView: string | undefined,
     @Req() request: FastifyRequest,
   ) {
     const resolved = await this.chapterService.findPublicByRouteSegments(
@@ -314,17 +320,21 @@ export class ChapterController {
       decodeURIComponent(chapterSegment),
     );
 
-    await this.chapterService.incrementViews(resolved.navigation.current.id);
+    const shouldTrackView = trackView !== 'false';
     await this.recordTrafficEvent(request, {
-      eventType: 'chapter_view',
+      eventType: shouldTrackView ? 'chapter_view' : 'chapter_lookup',
       entityType: 'chapter',
       entityId: resolved.navigation.current.id,
       metadata: {
         comicId: resolved.navigation.current.comicScan?.comic?.id || null,
         comicSegment: decodeURIComponent(comicSegment),
         chapterSegment: decodeURIComponent(chapterSegment),
+        trackView: shouldTrackView,
       },
     });
+    if (shouldTrackView) {
+      await this.chapterService.incrementViews(resolved.navigation.current.id);
+    }
     return this.buildChapterResponse(resolved.navigation);
   }
 
@@ -339,7 +349,6 @@ export class ChapterController {
       nav.current.comicScan?.comic,
       request.headers,
     );
-    await this.chapterService.incrementViews(id);
     await this.recordTrafficEvent(request, {
       eventType: 'chapter_view',
       entityType: 'chapter',
@@ -348,6 +357,7 @@ export class ChapterController {
         comicId: nav.current.comicScan?.comic?.id || null,
       },
     });
+    await this.chapterService.incrementViews(id);
     return this.buildChapterResponse(nav);
   }
 

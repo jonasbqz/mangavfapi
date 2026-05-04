@@ -308,18 +308,25 @@ export class ComicController {
   @ApiOperation({ summary: 'Get comic by protected route segment' })
   async findByRouteQuery(
     @Query('segment') segment: string,
+    @Query('trackView') trackView: string | undefined,
     @Req() request: FastifyRequest,
   ) {
     const comic = await this.comicService.findPublicByRouteSegment(
       decodeURIComponent(segment || ''),
     );
-    await this.comicService.incrementViews(comic.id);
+    const shouldTrackView = trackView !== 'false';
     await this.recordTrafficEvent(request, {
-      eventType: 'comic_view',
+      eventType: shouldTrackView ? 'comic_view' : 'comic_lookup',
       entityType: 'comic',
       entityId: comic.id,
-      metadata: { segment: decodeURIComponent(segment || '') },
+      metadata: {
+        segment: decodeURIComponent(segment || ''),
+        trackView: shouldTrackView,
+      },
     });
+    if (shouldTrackView) {
+      await this.comicService.incrementViews(comic.id);
+    }
     return comic;
   }
 
@@ -327,16 +334,23 @@ export class ComicController {
   @ApiOperation({ summary: 'Get comic by protected route segment' })
   async findByRouteSegment(
     @Param('segment') segment: string,
+    @Query('trackView') trackView: string | undefined,
     @Req() request: FastifyRequest,
   ) {
     const comic = await this.comicService.findPublicByRouteSegment(decodeURIComponent(segment));
-    await this.comicService.incrementViews(comic.id);
+    const shouldTrackView = trackView !== 'false';
     await this.recordTrafficEvent(request, {
-      eventType: 'comic_view',
+      eventType: shouldTrackView ? 'comic_view' : 'comic_lookup',
       entityType: 'comic',
       entityId: comic.id,
-      metadata: { segment: decodeURIComponent(segment) },
+      metadata: {
+        segment: decodeURIComponent(segment),
+        trackView: shouldTrackView,
+      },
     });
+    if (shouldTrackView) {
+      await this.comicService.incrementViews(comic.id);
+    }
     return comic;
   }
 
@@ -348,12 +362,12 @@ export class ComicController {
   ) {
     const comic = await this.comicService.findById(id);
     await this.routeProtectionService.assertLegacyAccess(comic, request.headers);
-    await this.comicService.incrementViews(id);
     await this.recordTrafficEvent(request, {
       eventType: 'comic_view',
       entityType: 'comic',
       entityId: id,
     });
+    await this.comicService.incrementViews(id);
     return comic;
   }
 
@@ -365,13 +379,13 @@ export class ComicController {
   ) {
     const comic = await this.comicService.findBySlug(slug);
     await this.routeProtectionService.assertLegacyAccess(comic, request.headers);
-    await this.comicService.incrementViews(comic.id);
     await this.recordTrafficEvent(request, {
       eventType: 'comic_view',
       entityType: 'comic',
       entityId: comic.id,
       metadata: { slug },
     });
+    await this.comicService.incrementViews(comic.id);
     return comic;
   }
 
