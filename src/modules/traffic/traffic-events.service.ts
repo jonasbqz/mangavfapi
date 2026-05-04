@@ -53,6 +53,8 @@ type TrafficAggregatePayload = TrafficEventPersistencePayload & {
   uniqueSearchHit: number;
 };
 
+type BlockedSubjectStatus = 'active' | 'unblocked' | 'all';
+
 const HOUR_MS = 60 * 60 * 1000;
 const DEFAULT_RAW_MIN_RISK_SCORE = 35;
 const DEFAULT_RAW_SAMPLE_RATE = 0.002; // 0.2% of low-risk traffic, enough for debugging without DB explosion.
@@ -125,6 +127,15 @@ export class TrafficEventsService {
         blocked: false,
         riskScore: 0,
         reasons: ['allowed_network'],
+      };
+    }
+
+    if (await this.isManuallyUnblockedSubject(subjectKey)) {
+      return {
+        action: 'allow' as TrafficAction,
+        blocked: false,
+        riskScore: 0,
+        reasons: ['manually_unblocked'],
       };
     }
 
@@ -206,6 +217,10 @@ export class TrafficEventsService {
         counters,
       },
     };
+
+    if (shouldBlock) {
+      await this.persistBlockedSubject(eventPayload);
+    }
 
     await this.persistAggregate({
       ...eventPayload,
@@ -368,6 +383,91 @@ export class TrafficEventsService {
     `);
 
     return this.rows(rows);
+  }
+
+  async getBlockedSubjects(filters: { status?: string; limit?: number }) {
+    const requestedStatus = filters.status || 'active';
+    const status: BlockedSubjectStatus = ['active', 'unblocked', 'all'].includes(requestedStatus)
+      ? requestedStatus as BlockedSubjectStatus
+      : 'active';
+    const limit = Math.min(Math.max(filters.limit || 100, 1), 500);
+
+    try {
+      const rows = await this.db.execute(sql`
+        select
+          subject_key as "subjectKey",
+          client_ip as "clientIp",
+          client_asn as "clientAsn",
+          user_agent as "userAgent",
+          status,
+          block_reason as "blockReason",
+          reasons,
+          risk_score as "riskScore",
+          first_blocked_at as "firstBlockedAt",
+          last_blocked_at as "lastBlockedAt",
+          blocked_count as "blockedCount",
+          unblocked_at as "unblockedAt",
+          unblocked_by as "unblockedBy",
+          unblock_reason as "unblockReason",
+          metadata
+        from traffic_blocked_subjects
+        where (${status}::text = 'all' or status = ${status})
+        order by
+          case when status = 'active' then 0 else 1 end,
+          last_blocked_at desc
+        limit ${limit}
+      `);
+
+      return this.rows(rows);
+    } catch (error) {
+      this.handleTrafficStorageError(error, 'traffic_blocked_subjects table is missing; run the 0014 blocked subjects migration.');
+      return [];
+    }
+  }
+
+  async unblockBlockedSubject(
+    subjectKey: string,
+    input: { actorId?: string | null; reason?: string | null },
+  ) {
+    try {
+      const result = await this.db.execute(sql`
+        update traffic_blocked_subjects
+        set
+          status = 'unblocked',
+          unblocked_at = now(),
+          unblocked_by = ${input.actorId || null},
+          unblock_reason = ${input.reason || null}
+        where subject_key = ${subjectKey}
+        returning
+          subject_key as "subjectKey",
+          client_ip as "clientIp",
+          client_asn as "clientAsn",
+          user_agent as "userAgent",
+          status,
+          block_reason as "blockReason",
+          reasons,
+          risk_score as "riskScore",
+          first_blocked_at as "firstBlockedAt",
+          last_blocked_at as "lastBlockedAt",
+          blocked_count as "blockedCount",
+          unblocked_at as "unblockedAt",
+          unblocked_by as "unblockedBy",
+          unblock_reason as "unblockReason",
+          metadata
+      `);
+      const [row] = this.rows(result);
+      if (!row) {
+        throw new NotFoundException('Blocked subject not found');
+      }
+
+      return row;
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      this.handleTrafficStorageError(error, 'traffic_blocked_subjects table is missing; run the 0014 blocked subjects migration.');
+      throw new NotFoundException('Blocked subject not found');
+    }
   }
 
   private async inspectCounters(input: {
@@ -597,6 +697,91 @@ export class TrafficEventsService {
     ].join(':');
 
     return (await this.incrementCounter(throttleKey, throttleMs)) === 1;
+  }
+
+  private async isManuallyUnblockedSubject(subjectKey: string): Promise<boolean> {
+    try {
+      const result = await this.db.execute(sql`
+        select status
+        from traffic_blocked_subjects
+        where subject_key = ${subjectKey}
+        limit 1
+      `);
+      const [row] = this.rows(result) as Array<{ status?: string }>;
+      return row?.status === 'unblocked';
+    } catch (error) {
+      this.handleTrafficStorageError(error, 'traffic_blocked_subjects table is missing; run the 0014 blocked subjects migration.');
+      return false;
+    }
+  }
+
+  private async persistBlockedSubject(values: TrafficEventPersistencePayload) {
+    if (this.configService.get<string>('TRAFFIC_EVENTS_PERSIST_ENABLED') === 'false') {
+      return;
+    }
+
+    const blockReason =
+      values.reasons?.find((reason) => reason.includes('datacenter')) ||
+      values.reasons?.find((reason) => reason.includes('rate')) ||
+      values.reasons?.[0] ||
+      'blocked_by_bot_detector';
+
+    try {
+      await this.db.execute(sql`
+        insert into traffic_blocked_subjects (
+          subject_key,
+          client_ip,
+          client_asn,
+          user_agent,
+          status,
+          block_reason,
+          reasons,
+          risk_score,
+          first_blocked_at,
+          last_blocked_at,
+          blocked_count,
+          metadata
+        )
+        values (
+          ${values.subjectKey},
+          ${values.clientIp || null},
+          ${values.clientAsn || null},
+          ${values.userAgent || null},
+          'active',
+          ${blockReason},
+          ${JSON.stringify(values.reasons || [])}::jsonb,
+          ${values.riskScore || 0},
+          coalesce(${values.occurredAt || null}, now()),
+          coalesce(${values.occurredAt || null}, now()),
+          1,
+          ${JSON.stringify({
+            lastEventType: values.eventType,
+            lastAction: values.action,
+            lastPath: values.path,
+            lastSearchQuery: values.searchQuery,
+            lastEntityType: values.entityType,
+            lastEntityId: values.entityId,
+          })}::jsonb
+        )
+        on conflict (subject_key) do update set
+          client_ip = coalesce(excluded.client_ip, traffic_blocked_subjects.client_ip),
+          client_asn = coalesce(excluded.client_asn, traffic_blocked_subjects.client_asn),
+          user_agent = coalesce(excluded.user_agent, traffic_blocked_subjects.user_agent),
+          status = 'active',
+          block_reason = coalesce(excluded.block_reason, traffic_blocked_subjects.block_reason),
+          reasons = (
+            select coalesce(jsonb_agg(distinct value), '[]'::jsonb)
+            from jsonb_array_elements_text(traffic_blocked_subjects.reasons || excluded.reasons) as reason(value)
+          ),
+          risk_score = greatest(traffic_blocked_subjects.risk_score, excluded.risk_score),
+          last_blocked_at = greatest(traffic_blocked_subjects.last_blocked_at, excluded.last_blocked_at),
+          blocked_count = traffic_blocked_subjects.blocked_count + 1,
+          metadata = traffic_blocked_subjects.metadata || excluded.metadata
+        where traffic_blocked_subjects.status <> 'unblocked'
+      `);
+    } catch (error) {
+      this.handleTrafficStorageError(error, 'traffic_blocked_subjects table is missing; run the 0014 blocked subjects migration.');
+    }
   }
 
   private async persistAggregate(values: TrafficAggregatePayload) {

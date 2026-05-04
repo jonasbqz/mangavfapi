@@ -1,5 +1,5 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
-import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, Headers, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { ApiBody, ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { AdminOrApiKeyGuard } from '@/modules/auth/admin-or-api-key.guard';
 import { TrafficEventsService } from './traffic-events.service';
 
@@ -40,6 +40,35 @@ export class TrafficEventsController {
     return this.trafficEventsService.getSuspiciousSubjects({
       hours: hours ? Number.parseInt(hours, 10) : undefined,
       limit: limit ? Number.parseInt(limit, 10) : undefined,
+    });
+  }
+
+  @Get('blocked')
+  @ApiOperation({ summary: 'Blocked bot subjects with manual unblock status' })
+  @ApiQuery({ name: 'status', required: false, enum: ['active', 'unblocked', 'all'] })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async blocked(
+    @Query('status') status?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.trafficEventsService.getBlockedSubjects({
+      status: status || undefined,
+      limit: limit ? Number.parseInt(limit, 10) : undefined,
+    });
+  }
+
+  @Post('blocked/:subjectKey/unblock')
+  @ApiOperation({ summary: 'Mark a blocked bot subject as manually unblocked' })
+  @ApiParam({ name: 'subjectKey', type: String })
+  @ApiBody({ required: false, schema: { type: 'object', properties: { reason: { type: 'string' } } } })
+  async unblock(
+    @Param('subjectKey') subjectKey: string,
+    @Headers('x-admin-actor-id') actorId?: string,
+    @Body() body?: { reason?: string },
+  ) {
+    return this.trafficEventsService.unblockBlockedSubject(subjectKey, {
+      actorId,
+      reason: body?.reason,
     });
   }
 }
