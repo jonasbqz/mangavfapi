@@ -62,7 +62,7 @@ const DEFAULT_RAW_SAMPLE_RATE = 0.002; // 0.2% of low-risk traffic, enough for d
 const DEFAULT_RAW_RETENTION_DAYS = 2;
 const DEFAULT_AGGREGATE_RETENTION_DAYS = 30;
 const DEFAULT_BLOCK_TTL_HOURS = 24;
-const DEFAULT_MAX_REQUESTS_PER_30S = 50;
+const DEFAULT_MAX_REQUESTS_PER_30S = 200;
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 
 @Injectable()
@@ -295,6 +295,8 @@ export class TrafficEventsService {
     // unique paths, searches, etc.). Those signals are useful for observability, but they
     // caused false 404s for normal users. The only automatic block is a clear burst: more
     // than BOT_MAX_REQUESTS_PER_30S requests from the same client IP in 30 seconds.
+    // Default is intentionally high because normal page loads can fan out into many API
+    // calls, image requests, and client-side refreshes.
     return input.counters.thirtySecondEvents > maxRequestsPer30s;
   }
 
