@@ -33,6 +33,7 @@ type RecordTrafficInput = {
 };
 
 type CounterSignals = {
+  thirtySecondEvents: number;
   minuteEvents: number;
   minuteSearches: number;
   minuteContentViews: number;
@@ -61,6 +62,7 @@ const DEFAULT_RAW_SAMPLE_RATE = 0.002; // 0.2% of low-risk traffic, enough for d
 const DEFAULT_RAW_RETENTION_DAYS = 2;
 const DEFAULT_AGGREGATE_RETENTION_DAYS = 30;
 const DEFAULT_BLOCK_TTL_HOURS = 24;
+const DEFAULT_MAX_REQUESTS_PER_30S = 50;
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 
 @Injectable()
@@ -132,7 +134,7 @@ export class TrafficEventsService {
     }
 
     const activeBlock = await this.getActiveBlockedSubject(subjectKey);
-    if (activeBlock) {
+    if (activeBlock && this.shouldHonorActiveBlock(activeBlock)) {
       await this.touchBlockedSubject(subjectKey, {
         clientIp,
         clientAsn,
@@ -280,31 +282,20 @@ export class TrafficEventsService {
       return false;
     }
 
-    if (
-      input.staticInspection.isWatchlistedDatacenter &&
-      this.configService.get<string>('BOT_BLOCK_DATACENTER') !== 'false'
-    ) {
-      return true;
-    }
-
     if (this.configService.get<string>('BOT_BLOCK_FAST_REQUESTS') === 'false') {
       return false;
     }
 
-    const maxRequestsPerMinute = this.readIntConfig('BOT_MAX_REQUESTS_PER_MINUTE', 120);
-    const maxSearchesPerMinute = this.readIntConfig('BOT_MAX_SEARCHES_PER_MINUTE', 30);
-    const maxContentViewsPerMinute = this.readIntConfig('BOT_MAX_CONTENT_VIEWS_PER_MINUTE', 80);
-    const maxUniquePaths10m = this.readIntConfig('BOT_MAX_UNIQUE_PATHS_10M', 80);
-    const maxUniqueSearches10m = this.readIntConfig('BOT_MAX_UNIQUE_SEARCHES_10M', 40);
-
-    return (
-      input.counters.minuteEvents > maxRequestsPerMinute ||
-      input.counters.minuteSearches > maxSearchesPerMinute ||
-      input.counters.minuteContentViews > maxContentViewsPerMinute ||
-      input.counters.uniquePaths10m > maxUniquePaths10m ||
-      input.counters.uniqueSearches10m > maxUniqueSearches10m ||
-      input.riskScore >= 95
+    const maxRequestsPer30s = this.readIntConfig(
+      'BOT_MAX_REQUESTS_PER_30S',
+      DEFAULT_MAX_REQUESTS_PER_30S,
     );
+
+    // Do not block from static heuristics (datacenter ASN/IP, bot-like UA, risk score,
+    // unique paths, searches, etc.). Those signals are useful for observability, but they
+    // caused false 404s for normal users. The only automatic block is a clear burst: more
+    // than BOT_MAX_REQUESTS_PER_30S requests from the same client IP in 30 seconds.
+    return input.counters.thirtySecondEvents > maxRequestsPer30s;
   }
 
   private isAllowedInfrastructure(
@@ -496,6 +487,10 @@ export class TrafficEventsService {
     searchQuery?: string | null;
   }): Promise<CounterSignals> {
     const keySubject = input.clientIp || 'unknown';
+    const thirtySecondEvents = await this.incrementCounter(
+      `traffic:${keySubject}:events:30s`,
+      30 * 1000,
+    );
     const minuteEvents = await this.incrementCounter(
       `traffic:${keySubject}:events:1m`,
       60 * 1000,
@@ -549,6 +544,15 @@ export class TrafficEventsService {
       );
     }
 
+    const maxRequestsPer30s = this.readIntConfig(
+      'BOT_MAX_REQUESTS_PER_30S',
+      DEFAULT_MAX_REQUESTS_PER_30S,
+    );
+    if (thirtySecondEvents > maxRequestsPer30s) {
+      riskScore += 50;
+      reasons.push('too_many_requests_30s');
+    }
+
     if (minuteEvents > 120) {
       riskScore += 35;
       reasons.push('high_request_rate_1m');
@@ -600,6 +604,7 @@ export class TrafficEventsService {
     }
 
     return {
+      thirtySecondEvents,
       minuteEvents,
       minuteSearches,
       minuteContentViews,
@@ -732,6 +737,16 @@ export class TrafficEventsService {
       this.handleTrafficStorageError(error, 'traffic_blocked_subjects table is missing; run the 0014 blocked subjects migration.');
       return false;
     }
+  }
+
+  private shouldHonorActiveBlock(activeBlock: { reasons: string[] }): boolean {
+    if (this.configService.get<string>('BOT_HONOR_TEMP_BLOCKS') === 'false') {
+      return false;
+    }
+
+    // Ignore stale blocks created by the old aggressive heuristics so normal users are not
+    // kept behind fake 404s after deploy. New automatic blocks carry this reason.
+    return activeBlock.reasons.includes('too_many_requests_30s');
   }
 
   private getBlockTtlHours(): number {
