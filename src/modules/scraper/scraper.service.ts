@@ -21,6 +21,8 @@ import type { ScraperResult } from "./scraper.types";
 export class ScraperService implements OnModuleInit {
   private readonly logger = new Logger(ScraperService.name);
   private readonly delayMs: number;
+  private readonly runOnStartup: boolean;
+  private readonly cronEnabled: boolean;
 
   constructor(
     @Inject(DATABASE_CONNECTION)
@@ -29,9 +31,18 @@ export class ScraperService implements OnModuleInit {
     private queue: ScraperQueue,
   ) {
     this.delayMs = this.configService.get<number>("SCRAPER_DELAY_MS") || 2000;
+    this.runOnStartup = this.getBooleanConfig("SCRAPER_RUN_ON_STARTUP", false);
+    this.cronEnabled = this.getBooleanConfig("SCRAPER_ENABLE_CRON", true);
   }
 
   async onModuleInit() {
+    if (!this.runOnStartup) {
+      this.logger.log(
+        "Startup scraping disabled. Set SCRAPER_RUN_ON_STARTUP=true to enable it.",
+      );
+      return;
+    }
+
     this.logger.log("Server started. Triggering initial scrape tasks...");
 
     this.scrapeIkigai(1, 10).catch((err) =>
@@ -91,6 +102,8 @@ export class ScraperService implements OnModuleInit {
    */
   @Cron(CronExpression.EVERY_HOUR)
   async scheduledIkigai() {
+    if (!this.cronEnabled) return;
+
     if (!this.queue.isRunning("ikigai")) {
       this.logger.log("Starting scheduled Ikigai scrape");
       await this.scrapeIkigai(1, 1);
@@ -102,6 +115,8 @@ export class ScraperService implements OnModuleInit {
    */
   @Cron(CronExpression.EVERY_2_HOURS)
   async scheduledOlympus() {
+    if (!this.cronEnabled) return;
+
     if (!this.queue.isRunning("olympus")) {
       this.logger.log("Starting scheduled Olympus scrape");
       await this.scrapeOlympus(1, 1);
@@ -113,6 +128,8 @@ export class ScraperService implements OnModuleInit {
    */
   // @Cron(CronExpression.EVERY_HOUR)
   async scheduledPeerless() {
+    if (!this.cronEnabled) return;
+
     if (!this.queue.isRunning("peerless")) {
       this.logger.log("Starting scheduled Peerless scrape");
       await this.scrapePeerless(1, 1);
@@ -124,6 +141,8 @@ export class ScraperService implements OnModuleInit {
    */
   @Cron("0 */5 * * *")
   async scheduledNobledicion() {
+    if (!this.cronEnabled) return;
+
     if (!this.queue.isRunning("nobledicion")) {
       this.logger.log("Starting scheduled Nobledicion scrape");
       await this.scrapeNobledicion(0, 0, 6);
@@ -206,5 +225,13 @@ export class ScraperService implements OnModuleInit {
 
       return result;
     });
+  }
+
+  private getBooleanConfig(name: string, defaultValue: boolean): boolean {
+    const value = this.configService.get<string>(name);
+    if (value === undefined || value === null || value === "") {
+      return defaultValue;
+    }
+    return ["1", "true", "yes", "on"].includes(String(value).toLowerCase());
   }
 }

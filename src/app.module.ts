@@ -9,7 +9,9 @@ import { ComicModule } from './modules/comic/comic.module';
 import { ChapterModule } from './modules/chapter/chapter.module';
 import { BookmarkModule } from './modules/bookmark/bookmark.module';
 import { ReadingHistoryModule } from './modules/reading-history/reading-history.module';
-import { ScraperModule } from './modules/scraper/scraper.module';
+// ScraperModule is intentionally not loaded here.
+// mango-scraper is now the runtime source of truth for scraping jobs.
+// Keep src/modules/scraper in this repo as historical/reference code only.
 import { LikesModule } from './modules/likes/likes.module';
 import { ChapterLikesModule } from './modules/chapter-likes/chapter-likes.module';
 import { CommentsModule } from './modules/comments/comments.module';
@@ -38,7 +40,7 @@ import { TrafficEventsModule } from './modules/traffic/traffic-events.module';
     ChapterModule,
     BookmarkModule,
     ReadingHistoryModule,
-    ScraperModule,
+    // ScraperModule disabled: use ../mango-scraper for scraper execution.
     LikesModule,
     ChapterLikesModule,
     CommentsModule,

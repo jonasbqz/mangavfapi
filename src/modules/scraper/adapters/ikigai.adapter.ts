@@ -433,7 +433,10 @@ export class IkigaiAdapter extends BaseScraperAdapter {
 
   private async ensureComicScan(comicId: number, comic: ScrapedComic): Promise<number> {
     const existing = await this.db.query.comicScans.findFirst({
-      where: eq(comicScans.comicId, comicId),
+      where: and(
+        eq(comicScans.comicId, comicId),
+        eq(comicScans.scanGroupId, this.scanGroupId!),
+      ),
     });
 
     if (existing) return existing.id;
