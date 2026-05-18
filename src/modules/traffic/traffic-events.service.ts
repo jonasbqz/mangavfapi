@@ -68,6 +68,8 @@ const DEFAULT_MAX_SEARCHES_PER_30S = 10;
 const DEFAULT_BLOCK_MAX_REQUESTS_PER_30S = 250;
 const DEFAULT_BLOCK_MAX_SEARCHES_PER_30S = 25;
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+const DEFAULT_BLOCKED_SUBJECTS_LIMIT = 1000;
+const MAX_BLOCKED_SUBJECTS_LIMIT = 10000;
 
 @Injectable()
 export class TrafficEventsService {
@@ -403,7 +405,10 @@ export class TrafficEventsService {
     const status: BlockedSubjectStatus = ['active', 'unblocked', 'all'].includes(requestedStatus)
       ? requestedStatus as BlockedSubjectStatus
       : 'active';
-    const limit = Math.min(Math.max(filters.limit || 100, 1), 500);
+    const limit = Math.min(
+      Math.max(filters.limit || DEFAULT_BLOCKED_SUBJECTS_LIMIT, 1),
+      MAX_BLOCKED_SUBJECTS_LIMIT,
+    );
     const search = (filters.q || '').trim();
     const searchPattern = search ? `%${search}%` : null;
 
