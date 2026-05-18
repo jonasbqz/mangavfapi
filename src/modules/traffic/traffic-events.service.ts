@@ -68,8 +68,8 @@ const DEFAULT_MAX_SEARCHES_PER_30S = 10;
 const DEFAULT_BLOCK_MAX_REQUESTS_PER_30S = 250;
 const DEFAULT_BLOCK_MAX_SEARCHES_PER_30S = 25;
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
-const DEFAULT_BLOCKED_SUBJECTS_LIMIT = 1000;
-const MAX_BLOCKED_SUBJECTS_LIMIT = 10000;
+const DEFAULT_BLOCKED_SUBJECTS_LIMIT = 100;
+const MAX_BLOCKED_SUBJECTS_LIMIT = 500;
 
 @Injectable()
 export class TrafficEventsService {
@@ -400,7 +400,7 @@ export class TrafficEventsService {
     return this.rows(rows);
   }
 
-  async getBlockedSubjects(filters: { status?: string; limit?: number; q?: string }) {
+  async getBlockedSubjects(filters: { status?: string; limit?: number; offset?: number; q?: string }) {
     const requestedStatus = filters.status || 'active';
     const status: BlockedSubjectStatus = ['active', 'unblocked', 'all'].includes(requestedStatus)
       ? requestedStatus as BlockedSubjectStatus
@@ -409,10 +409,28 @@ export class TrafficEventsService {
       Math.max(filters.limit || DEFAULT_BLOCKED_SUBJECTS_LIMIT, 1),
       MAX_BLOCKED_SUBJECTS_LIMIT,
     );
+    const offset = Math.max(filters.offset || 0, 0);
     const search = (filters.q || '').trim();
     const searchPattern = search ? `%${search}%` : null;
 
     try {
+      const countResult = await this.db.execute(sql`
+        select count(*)::int as total
+        from traffic_blocked_subjects
+        where (${status}::text = 'all' or status = ${status})
+          and (
+            ${searchPattern}::text is null
+            or client_ip ilike ${searchPattern}
+            or subject_key ilike ${searchPattern}
+            or coalesce(user_agent, '') ilike ${searchPattern}
+            or coalesce(block_reason, '') ilike ${searchPattern}
+            or status ilike ${searchPattern}
+            or coalesce(client_asn::text, '') ilike ${searchPattern}
+            or reasons::text ilike ${searchPattern}
+          )
+      `);
+      const [countRow] = this.rows(countResult) as Array<{ total?: number }>;
+
       const rows = await this.db.execute(sql`
         select
           subject_key as "subjectKey",
@@ -447,12 +465,18 @@ export class TrafficEventsService {
           case when status = 'active' then 0 else 1 end,
           last_blocked_at desc
         limit ${limit}
+        offset ${offset}
       `);
 
-      return this.rows(rows);
+      return {
+        items: this.rows(rows),
+        total: Number(countRow?.total || 0),
+        limit,
+        offset,
+      };
     } catch (error) {
       this.handleTrafficStorageError(error, 'traffic_blocked_subjects table is missing; run the 0014 blocked subjects migration.');
-      return [];
+      return { items: [], total: 0, limit, offset };
     }
   }
 
