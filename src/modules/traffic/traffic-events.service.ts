@@ -62,9 +62,11 @@ const DEFAULT_RAW_MIN_RISK_SCORE = 35;
 const DEFAULT_RAW_SAMPLE_RATE = 0.002; // 0.2% of low-risk traffic, enough for debugging without DB explosion.
 const DEFAULT_RAW_RETENTION_DAYS = 2;
 const DEFAULT_AGGREGATE_RETENTION_DAYS = 30;
-const DEFAULT_BLOCK_TTL_HOURS = 24;
+const DEFAULT_BLOCK_TTL_HOURS = 1;
 const DEFAULT_MAX_REQUESTS_PER_30S = 200;
 const DEFAULT_MAX_SEARCHES_PER_30S = 10;
+const DEFAULT_BLOCK_MAX_REQUESTS_PER_30S = 250;
+const DEFAULT_BLOCK_MAX_SEARCHES_PER_30S = 25;
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 
 @Injectable()
@@ -136,23 +138,27 @@ export class TrafficEventsService {
     }
 
     const activeBlock = await this.getActiveBlockedSubject(subjectKey);
-    if (activeBlock && this.shouldHonorActiveBlock(activeBlock)) {
-      await this.touchBlockedSubject(subjectKey, {
-        clientIp,
-        clientAsn,
-        userAgent,
-        path,
-        eventType: input.eventType,
-        entityType: input.entityType || null,
-        entityId: input.entityId || null,
-      });
+    if (activeBlock) {
+      if (this.shouldHonorActiveBlock(activeBlock)) {
+        await this.touchBlockedSubject(subjectKey, {
+          clientIp,
+          clientAsn,
+          userAgent,
+          path,
+          eventType: input.eventType,
+          entityType: input.entityType || null,
+          entityId: input.entityId || null,
+        });
 
-      return {
-        action: 'rate_limited' as TrafficAction,
-        blocked: true,
-        riskScore: activeBlock.riskScore || 100,
-        reasons: ['temporary_bot_block', ...(activeBlock.reasons || [])],
-      };
+        return {
+          action: 'rate_limited' as TrafficAction,
+          blocked: true,
+          riskScore: activeBlock.riskScore || 100,
+          reasons: ['temporary_bot_block', ...(activeBlock.reasons || [])],
+        };
+      }
+
+      await this.expireIgnoredActiveBlock(subjectKey, activeBlock.reasons);
     }
 
     const staticInspection = inspectTrafficEvent({
@@ -288,26 +294,13 @@ export class TrafficEventsService {
       return false;
     }
 
-    const maxRequestsPer30s = this.readIntConfig(
-      'BOT_MAX_REQUESTS_PER_30S',
-      DEFAULT_MAX_REQUESTS_PER_30S,
-    );
-    const maxSearchesPer30s = this.readIntConfig(
-      'BOT_MAX_SEARCHES_PER_30S',
-      DEFAULT_MAX_SEARCHES_PER_30S,
-    );
-
-    // Do not block from static heuristics (datacenter ASN/IP, bot-like UA, risk score,
-    // unique paths, searches, etc.). Those signals are useful for observability, but they
-    // caused false 404s for normal users. The only automatic block is a clear burst: more
-    // than BOT_MAX_REQUESTS_PER_30S total requests, or more than
-    // BOT_MAX_SEARCHES_PER_30S search requests, from the same client IP in 30 seconds.
-    // Total request default is intentionally high because normal page loads can fan out
-    // into many API calls, image requests, and client-side refreshes. Search default is
-    // stricter because more than 10 searches in 30s is not normal human behavior.
+    // Do not create 24h fake-404 blocks from normal rate-limit signals. Search abuse
+    // can happen accidentally through autocomplete/debounce issues or impatient users,
+    // so it should normally return 429 only. Temporary bot blocks are reserved for hard
+    // burst thresholds that are far above human behavior.
     return (
-      input.counters.thirtySecondEvents > maxRequestsPer30s ||
-      input.counters.thirtySecondSearches > maxSearchesPer30s
+      input.counters.reasons.includes('hard_request_burst_30s') ||
+      input.counters.reasons.includes('hard_search_burst_30s')
     );
   }
 
@@ -570,6 +563,14 @@ export class TrafficEventsService {
       'BOT_MAX_SEARCHES_PER_30S',
       DEFAULT_MAX_SEARCHES_PER_30S,
     );
+    const blockMaxRequestsPer30s = this.readIntConfig(
+      'BOT_BLOCK_MAX_REQUESTS_PER_30S',
+      DEFAULT_BLOCK_MAX_REQUESTS_PER_30S,
+    );
+    const blockMaxSearchesPer30s = this.readIntConfig(
+      'BOT_BLOCK_MAX_SEARCHES_PER_30S',
+      DEFAULT_BLOCK_MAX_SEARCHES_PER_30S,
+    );
     if (thirtySecondEvents > maxRequestsPer30s) {
       riskScore += 50;
       reasons.push('too_many_requests_30s');
@@ -577,6 +578,14 @@ export class TrafficEventsService {
     if (thirtySecondSearches > maxSearchesPer30s) {
       riskScore += 50;
       reasons.push('too_many_searches_30s');
+    }
+    if (thirtySecondEvents > blockMaxRequestsPer30s) {
+      riskScore += 50;
+      reasons.push('hard_request_burst_30s');
+    }
+    if (thirtySecondSearches > blockMaxSearchesPer30s) {
+      riskScore += 50;
+      reasons.push('hard_search_burst_30s');
     }
 
     if (minuteEvents > 120) {
@@ -774,8 +783,8 @@ export class TrafficEventsService {
     // Ignore stale blocks created by the old aggressive heuristics so normal users are not
     // kept behind fake 404s after deploy. New automatic blocks carry this reason.
     return (
-      activeBlock.reasons.includes('too_many_requests_30s') ||
-      activeBlock.reasons.includes('too_many_searches_30s')
+      activeBlock.reasons.includes('hard_request_burst_30s') ||
+      activeBlock.reasons.includes('hard_search_burst_30s')
     );
   }
 
@@ -784,6 +793,24 @@ export class TrafficEventsService {
       this.readIntConfig('BOT_BLOCK_TTL_HOURS', DEFAULT_BLOCK_TTL_HOURS),
       1,
     );
+  }
+
+  private async expireIgnoredActiveBlock(subjectKey: string, reasons: string[]) {
+    try {
+      await this.db.execute(sql`
+        update traffic_blocked_subjects
+        set
+          status = 'expired',
+          metadata = metadata || ${JSON.stringify({
+            expiredBy: 'ignored_legacy_or_soft_rate_limit_block',
+            previousReasons: reasons,
+          })}::jsonb
+        where subject_key = ${subjectKey}
+          and status = 'active'
+      `);
+    } catch (error) {
+      this.handleTrafficStorageError(error, 'traffic_blocked_subjects table is missing; run the 0015 block TTL migration.');
+    }
   }
 
   private async getActiveBlockedSubject(subjectKey: string): Promise<{
@@ -1088,6 +1115,17 @@ export class TrafficEventsService {
         where status = 'active'
           and blocked_until is not null
           and blocked_until <= now()
+      `);
+      await this.db.execute(sql`
+        update traffic_blocked_subjects
+        set
+          status = 'expired',
+          metadata = metadata || ${JSON.stringify({
+            expiredBy: 'legacy_or_soft_rate_limit_cleanup',
+          })}::jsonb
+        where status = 'active'
+          and not (reasons ? 'hard_request_burst_30s')
+          and not (reasons ? 'hard_search_burst_30s')
       `);
     } catch (error) {
       this.handleTrafficStorageError(error, 'traffic storage tables are missing; run traffic migrations.');

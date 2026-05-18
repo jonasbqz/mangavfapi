@@ -86,9 +86,10 @@ export class ComicController {
       await this.recordTrafficEvent(request, {
         eventType: inspection.search ? 'comic_search' : 'comic_list',
         searchQuery: inspection.search || null,
-        action: 'rate_limited',
+        action: 'observe',
         metadata: {
           searchInspectionAction: inspection.action,
+          transientRateLimit: true,
         },
       });
       throw this.searchAbuseService.createRateLimitException();
