@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from bs4 import BeautifulSoup
 import httpx
 
-app = FastAPI(title="MangaVF Scraper", version="1.2")
+app = FastAPI(title="MangaVF Scraper", version="1.3")
 
 app.add_middleware(
     CORSMiddleware,
@@ -38,6 +38,29 @@ async def verificar_pagina(client: httpx.AsyncClient, url: str, pagina_num: int)
         pass
     return None
 
+def extraer_cover(card):
+    # Intenta buscar una etiqueta img
+    img = card.select_one('img')
+    if img:
+        src = img.get('data-src') or img.get('src') or ''
+        if src.startswith('//'): src = 'https:' + src
+        return src
+    # Si no hay img, busca un div con background-image
+    divs = card.select('div[style*="background-image"]')
+    for div in divs:
+        style = div.get('style', '')
+        match = re.search(r'url\(["\']?(.*?)["\']?\)', style)
+        if match:
+            url = match.group(1)
+            if url.startswith('//'): url = 'https:' + url
+            return url
+    return ""
+
+def limpiar_titulo(texto):
+    # Elimina números al inicio (como contadores de vistas)
+    texto_limpio = re.sub(r'^\d+', '', texto).strip()
+    return texto_limpio
+
 @app.get("/api/v1/manga/home")
 async def get_home_mangas():
     url = "https://www.mangavf.fr/es/"
@@ -50,17 +73,14 @@ async def get_home_mangas():
         raise HTTPException(status_code=503, detail="MangaVF devolvió un error")
     soup = BeautifulSoup(res.text, 'html.parser')
     mangas = []
-    cards = soup.select('div.manga-item') or soup.select('article.post') or soup.select('div.series-card')
+    cards = soup.select('div.manga-item') or soup.select('article.post') or soup.select('div.series-card') or soup.select('div.col-lg-2')
     for card in cards:
-        title_el = card.select_one('h3 a') or card.select_one('h2 a') or card.select_one('a')
+        title_el = card.select_one('h3 a') or card.select_one('h2 a') or card.select_one('h5 a') or card.select_one('a')
         if not title_el: continue
-        title = title_el.get_text(strip=True)
+        
+        title = limpiar_titulo(title_el.get_text(strip=True))
         link = title_el.get('href', '')
-        cover = ""
-        thumb = card.select_one('img')
-        if thumb:
-            cover = thumb.get('src') or thumb.get('data-src', '')
-        if cover.startswith('//'): cover = 'https:' + cover
+        cover = extraer_cover(card)
         slug_match = re.search(r'mangavf\.fr/es/([^/]+)/?', link)
         slug = slug_match.group(1) if slug_match else ""
         if title and link:
@@ -83,19 +103,15 @@ async def search_manga(q: str = Query(..., min_length=2)):
     for card in cards:
         title_el = card.select_one('h3 a') or card.select_one('h2 a') or card.select_one('a')
         if not title_el: continue
-        title = title_el.get_text(strip=True)
+        title = limpiar_titulo(title_el.get_text(strip=True))
         link = title_el.get('href', '')
-        cover = ""
-        thumb = card.select_one('img')
-        if thumb: cover = thumb.get('src') or thumb.get('data-src', '')
-        if cover.startswith('//'): cover = 'https:' + cover
+        cover = extraer_cover(card)
         slug_match = re.search(r'mangavf\.fr/es/([^/]+)/?', link)
         slug = slug_match.group(1) if slug_match else ""
         if title and link:
             resultados.append({"title": title, "slug": slug, "url": link, "cover": cover, "synopsis": "", "status": "Desconocido", "genres": []})
     return {"success": True, "query": q, "total_results": len(resultados), "results": resultados}
 
-# MEJORADO: Ahora trae Sinopsis, Géneros y Status
 @app.get("/api/v1/manga/chapters")
 async def list_chapters(url: str = Query(...)):
     if 'mangavf.fr/es/' not in url:
@@ -108,32 +124,18 @@ async def list_chapters(url: str = Query(...)):
     if res.status_code != 200:
         raise HTTPException(status_code=404, detail="Manga no encontrado")
     soup = BeautifulSoup(res.text, 'html.parser')
-
     title_el = soup.select_one('h1') or soup.select_one('h2')
-    manga_title = title_el.get_text(strip=True) if title_el else "Desconocido"
-
-    # Extraer Sinopsis
+    manga_title = limpiar_titulo(title_el.get_text(strip=True)) if title_el else "Desconocido"
     synopsis_el = soup.select_one('div.summary') or soup.select_one('div.manga-summary') or soup.select_one('meta[name="description"]')
     if synopsis_el:
         synopsis = synopsis_el.get_text(strip=True) if synopsis_el.name != 'meta' else synopsis_el.get('content', '')
     else:
         synopsis = "Sin sinopsis disponible."
-
-    # Extraer Status
     status_el = soup.select_one('div.status') or soup.select_one('span.status')
     status = status_el.get_text(strip=True) if status_el else "Desconocido"
-
-    # Extraer Géneros
     genre_els = soup.select('div.genres a') or soup.select('span.genre a')
     genres = [g.get_text(strip=True) for g in genre_els]
-
-    # Extraer Cover (por si acaso)
-    cover_el = soup.select_one('div.manga-cover img') or soup.select_one('img.cover')
-    cover = ""
-    if cover_el:
-        cover = cover_el.get('src') or cover_el.get('data-src', '')
-        if cover.startswith('//'): cover = 'https:' + cover
-
+    cover = extraer_cover(soup)
     capitulos = []
     chapter_items = soup.select('a[href*="-capitulo-"]') or soup.select('div.chapter-list a')
     for item in chapter_items:
@@ -144,17 +146,7 @@ async def list_chapters(url: str = Query(...)):
         if chap_url:
             capitulos.append({"number": chap_num, "title": chap_title, "url": chap_url if chap_url.startswith('http') else f"https://www.mangavf.fr{chap_url}"})
     capitulos.sort(key=lambda c: int(c["number"]) if c["number"].isdigit() else 9999)
-
-    return {
-        "success": True,
-        "manga_title": manga_title,
-        "cover": cover,
-        "synopsis": synopsis,
-        "status": status,
-        "genres": genres,
-        "total_chapters": len(capitulos),
-        "chapters": capitulos
-    }
+    return {"success": True, "manga_title": manga_title, "cover": cover, "synopsis": synopsis, "status": status, "genres": genres, "total_chapters": len(capitulos), "chapters": capitulos}
 
 @app.get("/api/v1/manga/extract")
 async def extract_manga(url: str = Query(..., description="URL del capítulo")):
