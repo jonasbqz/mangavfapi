@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from bs4 import BeautifulSoup
 import httpx
 
-app = FastAPI(title="MangaVF Scraper", version="1.0")
+app = FastAPI(title="MangaVF Scraper", version="1.1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -38,45 +38,61 @@ async def verificar_pagina(client: httpx.AsyncClient, url: str, pagina_num: int)
         pass
     return None
 
-@app.get("/api/v1/manga/extract")
-async def extract_manga(url: str = Query(..., description="URL del capítulo")):
-    pattern = r"mangavf\.fr/es/([^/]+)/[^/]+-capitulo-(\d+)\.html"
-    match = re.search(pattern, url)
-    if not match:
-        raise HTTPException(status_code=400, detail="URL inválida.")
-    
-    manga_slug = match.group(1)
-    capitulo = match.group(2)
-    img_urls = []
-
+# NUEVO: ENDPOINT PARA LA VITRINA (HOME)
+@app.get("/api/v1/manga/home")
+async def get_home_mangas():
+    url = "https://www.mangavf.fr/es/"
     async with httpx.AsyncClient(headers=HEADERS, follow_redirects=True) as client:
         try:
-            html_res = await client.get(url, timeout=10.0)
-            if html_res.status_code == 200:
-                soup = BeautifulSoup(html_res.text, 'html.parser')
-                for img in soup.find_all('img'):
-                    src = img.get('src') or img.get('data-src')
-                    if src and ('cdn.mangavf.fr' in src or 'Book-es' in src):
-                        if src.startswith('//'): src = 'https:' + src
-                        if src not in img_urls: img_urls.append(src)
+            res = await client.get(url, timeout=10.0)
         except Exception:
-            pass
+            raise HTTPException(status_code=503, detail="Error conectando a MangaVF")
+    
+    if res.status_code != 200:
+        raise HTTPException(status_code=503, detail="MangaVF devolvió un error")
 
-        if not img_urls:
-            manga_folder = limpiar_nombre_manga(manga_slug)
-            base_cdn = f"https://cdn.mangavf.fr/cdn/Book-es/{manga_folder}/Capitulo%20{capitulo}"
-            tareas = []
-            for i in range(1, 151):
-                img_url = f"{base_cdn}/{i:03d}.jpeg"
-                tareas.append(verificar_pagina(client, img_url, i))
-            resultados = await asyncio.gather(*tareas)
-            paginas_validas = sorted([r for r in resultados if r is not None], key=lambda x: x["page"])
-            img_urls = [p["url"] for p in paginas_validas]
+    soup = BeautifulSoup(res.text, 'html.parser')
+    mangas = []
 
-    if not img_urls:
-        raise HTTPException(status_code=404, detail="No se encontraron imágenes.")
-    return {"success": True, "manga": manga_slug.replace("-", " ").title(), "chapter": capitulo, "total_pages": len(img_urls), "pages": img_urls}
+    # Buscamos las cartas de mangas en la página principal
+    cards = (
+        soup.select('div.popular-slider div.manga-item') or 
+        soup.select('div.latest-slider div.manga-item') or
+        soup.select('div.manga-item') or
+        soup.select('article.post') or
+        soup.select('div.series-card')
+    )
 
+    for card in cards:
+        title_el = card.select_one('h3 a') or card.select_one('h2 a') or card.select_one('a')
+        if not title_el:
+            continue
+        
+        title = title_el.get_text(strip=True)
+        link = title_el.get('href', '')
+        
+        cover = ""
+        thumb = card.select_one('img')
+        if thumb:
+            cover = thumb.get('src') or thumb.get('data-src', '')
+        if cover.startswith('//'):
+            cover = 'https:' + cover
+
+        slug_match = re.search(r'mangavf\.fr/es/([^/]+)/?', link)
+        slug = slug_match.group(1) if slug_match else ""
+
+        if title and link:
+            mangas.append({
+                "title": title,
+                "slug": slug,
+                "url": link,
+                "cover": cover
+            })
+
+    return {"success": True, "total_results": len(mangas), "results": mangas}
+
+
+# LOS DEMAS ENDPOINTS QUE YA TENÍAS
 @app.get("/api/v1/manga/search")
 async def search_manga(q: str = Query(..., min_length=2)):
     search_url = f"https://www.mangavf.fr/es/?s={quote(q)}"
@@ -130,6 +146,45 @@ async def list_chapters(url: str = Query(...)):
             capitulos.append({"number": chap_num, "title": chap_title, "url": chap_url if chap_url.startswith('http') else f"https://www.mangavf.fr{chap_url}"})
     capitulos.sort(key=lambda c: int(c["number"]) if c["number"].isdigit() else 9999)
     return {"success": True, "manga_title": manga_title, "total_chapters": len(capitulos), "chapters": capitulos}
+
+@app.get("/api/v1/manga/extract")
+async def extract_manga(url: str = Query(..., description="URL del capítulo")):
+    pattern = r"mangavf\.fr/es/([^/]+)/[^/]+-capitulo-(\d+)\.html"
+    match = re.search(pattern, url)
+    if not match:
+        raise HTTPException(status_code=400, detail="URL inválida.")
+    
+    manga_slug = match.group(1)
+    capitulo = match.group(2)
+    img_urls = []
+
+    async with httpx.AsyncClient(headers=HEADERS, follow_redirects=True) as client:
+        try:
+            html_res = await client.get(url, timeout=10.0)
+            if html_res.status_code == 200:
+                soup = BeautifulSoup(html_res.text, 'html.parser')
+                for img in soup.find_all('img'):
+                    src = img.get('src') or img.get('data-src')
+                    if src and ('cdn.mangavf.fr' in src or 'Book-es' in src):
+                        if src.startswith('//'): src = 'https:' + src
+                        if src not in img_urls: img_urls.append(src)
+        except Exception:
+            pass
+
+        if not img_urls:
+            manga_folder = limpiar_nombre_manga(manga_slug)
+            base_cdn = f"https://cdn.mangavf.fr/cdn/Book-es/{manga_folder}/Capitulo%20{capitulo}"
+            tareas = []
+            for i in range(1, 151):
+                img_url = f"{base_cdn}/{i:03d}.jpeg"
+                tareas.append(verificar_pagina(client, img_url, i))
+            resultados = await asyncio.gather(*tareas)
+            paginas_validas = sorted([r for r in resultados if r is not None], key=lambda x: x["page"])
+            img_urls = [p["url"] for p in paginas_validas]
+
+    if not img_urls:
+        raise HTTPException(status_code=404, detail="No se encontraron imágenes.")
+    return {"success": True, "manga": manga_slug.replace("-", " ").title(), "chapter": capitulo, "total_pages": len(img_urls), "pages": img_urls}
 
 if __name__ == "__main__":
     import uvicorn
