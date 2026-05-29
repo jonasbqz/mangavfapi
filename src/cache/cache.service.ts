@@ -40,7 +40,19 @@ export const CACHE_KEYS = {
 
 @Injectable()
 export class CacheService {
+  private lastErrorTime = 0;
+  private readonly ERROR_COOLDOWN_MS = 30000; // Only log errors every 30 seconds
+
   constructor(@Inject(CACHE_MANAGER) private cacheManager: Cache) {}
+
+  private shouldLogError(): boolean {
+    const now = Date.now();
+    if (now - this.lastErrorTime >= this.ERROR_COOLDOWN_MS) {
+      this.lastErrorTime = now;
+      return true;
+    }
+    return false;
+  }
 
   /**
    * Get value from cache
@@ -49,7 +61,9 @@ export class CacheService {
     try {
       return await this.cacheManager.get<T>(key);
     } catch (error) {
-      console.error(`Cache get error for key ${key}:`, error);
+      if (this.shouldLogError()) {
+        console.error(`Cache get error (suppressed subsequent errors for 30s):`, error.message);
+      }
       return undefined;
     }
   }
@@ -65,7 +79,9 @@ export class CacheService {
     try {
       await this.cacheManager.set(key, value, ttl);
     } catch (error) {
-      console.error(`Cache set error for key ${key}:`, error);
+      if (this.shouldLogError()) {
+        console.error(`Cache set error (suppressed subsequent errors for 30s):`, error.message);
+      }
     }
   }
 
@@ -76,7 +92,9 @@ export class CacheService {
     try {
       await this.cacheManager.del(key);
     } catch (error) {
-      console.error(`Cache delete error for key ${key}:`, error);
+      if (this.shouldLogError()) {
+        console.error(`Cache delete error (suppressed subsequent errors for 30s):`, error.message);
+      }
     }
   }
 
@@ -96,7 +114,9 @@ export class CacheService {
         }
       }
     } catch (error) {
-      console.error(`Cache pattern delete error for ${pattern}:`, error);
+      if (this.shouldLogError()) {
+        console.error(`Cache pattern delete error (suppressed subsequent errors for 30s):`, error.message);
+      }
     }
   }
 
@@ -190,7 +210,9 @@ export class CacheService {
         }
       }
     } catch (error) {
-      console.error('Error incrementing daily view in Redis:', error);
+      if (this.shouldLogError()) {
+        console.error('Error incrementing daily view (suppressed subsequent errors for 30s):', error.message);
+      }
     }
   }
 
@@ -208,7 +230,9 @@ export class CacheService {
         return ids.map((id: string) => parseInt(id, 10));
       }
     } catch (error) {
-      console.error('Error getting daily trending comics from Redis:', error);
+      if (this.shouldLogError()) {
+        console.error('Error getting daily trending (suppressed subsequent errors for 30s):', error.message);
+      }
     }
     return [];
   }

@@ -5,8 +5,8 @@ import { and, eq } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import type * as schema from "@/database/schema";
 import { DATABASE_CONNECTION } from "@/database/database.module";
-import { account, profiles, session as authSession, user as authUser } from "@/database/schema";
-import { auth } from "@/lib/auth";
+import { account, profiles, user as authUser } from "@/database/schema";
+import { SessionResolverService } from "@/modules/auth/session-resolver";
 import { JwtDownloadService } from "./jwt-download.service";
 import {
   getEmailVerificationRequiredError,
@@ -18,6 +18,7 @@ import {
 export class JwtDownloadController {
   constructor(
     private readonly jwtDownloadService: JwtDownloadService,
+    private readonly sessionResolver: SessionResolverService,
     @Inject(DATABASE_CONNECTION)
     private readonly db: NodePgDatabase<typeof schema>,
   ) {}
@@ -35,33 +36,12 @@ export class JwtDownloadController {
       "Authenticated users get a token with their plan. Anonymous users get a free-tier token valid for 10 minutes.",
   })
   async generateDownloadToken(@Req() request: FastifyRequest) {
-    // Usar directamente las cabeceras de Fastify de la misma forma que lo hace el AuthGuard
-    let session = await auth.api
-      .getSession({ headers: request.headers as any })
-      .catch((err) => {
-        console.error("[jwt-download] Error getSession:", err);
-        return null;
-      });
+    // Resolve session via shared service (cookie + Bearer token fallback)
+    const session = await this.sessionResolver.resolveSession(
+      request.headers as Record<string, any>,
+    );
 
-    // Fallback: Si better-auth falla debido a restricciones cross-domain o parseo de cabeceras en Fastify,
-    // verificamos manualmente si el frontend envió un "Authorization: Bearer <token>" e interceptamos la DB.
-    if (!session?.user) {
-      const authHeader = request.headers.authorization;
-      if (
-        typeof authHeader === "string" &&
-        authHeader.toLowerCase().startsWith("bearer ")
-      ) {
-        const tokenStr = authHeader.substring(7).trim();
-        const sessionRecord = await this.db.query.session.findFirst({
-          where: eq(authSession.token, tokenStr),
-        });
-        if (sessionRecord && sessionRecord.userId) {
-          session = { user: { id: sessionRecord.userId } } as any;
-        }
-      }
-    }
-
-    if (!session?.user) {
+    if (!session) {
       // Token anónimo
       const token = await this.jwtDownloadService.generateToken({
         userId: null,

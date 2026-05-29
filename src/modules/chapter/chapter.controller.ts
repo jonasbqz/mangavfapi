@@ -15,12 +15,12 @@ import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { ChapterService } from './chapter.service';
 import { ComicService } from '../comic/comic.service';
 import { DATABASE_CONNECTION } from '@/database/database.module';
-import { auth } from '@/lib/auth';
 import { eq } from 'drizzle-orm';
-import { profiles, session as authSession } from '@/database/schema';
+import { profiles } from '@/database/schema';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '@/database/schema';
 import type { FastifyRequest } from 'fastify';
+import { SessionResolverService } from '@/modules/auth/session-resolver';
 import { JwtDownloadService } from '../jwt-download/jwt-download.service';
 import { RouteProtectionService } from '../route-protection/route-protection.service';
 import { TrafficEventsService } from '../traffic/traffic-events.service';
@@ -43,6 +43,7 @@ export class ChapterController {
     private db: NodePgDatabase<typeof schema>,
     private jwtDownloadService: JwtDownloadService,
     private routeProtectionService: RouteProtectionService,
+    private sessionResolver: SessionResolverService,
     private trafficEventsService: TrafficEventsService,
   ) {}
 
@@ -449,29 +450,11 @@ export class ChapterController {
 
       // 2. Fallback to session check if JWT was invalid, absent, or not premium
       if (!isPremiumActive) {
-        // Resolve session directly via better-auth (supports both cookie & Bearer token)
-        let session = await auth.api.getSession({
-          headers: request.headers as any,
-        }).catch(() => null);
+        const session = await this.sessionResolver.resolveSession(
+          request.headers as Record<string, any>,
+        );
 
-        // Fallback: Si better-auth falla debido a restricciones cross-domain o parseo de cabeceras en Fastify
-        if (!session?.user) {
-          const authHeader = request.headers.authorization;
-          if (
-            typeof authHeader === 'string' &&
-            authHeader.toLowerCase().startsWith('bearer ')
-          ) {
-            const tokenStr = authHeader.substring(7).trim();
-            const sessionRecord = await this.db.query.session.findFirst({
-              where: eq(authSession.token, tokenStr),
-            });
-            if (sessionRecord && sessionRecord.userId) {
-              session = { user: { id: sessionRecord.userId } } as any;
-            }
-          }
-        }
-
-        if (!session?.user) {
+        if (!session) {
           throw new UnauthorizedException(
             'Authentication required to fetch 25 or 50 chapters at once.',
           );

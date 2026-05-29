@@ -1,6 +1,7 @@
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CacheService } from '@/cache/cache.service';
+import { randomInt } from 'crypto';
 
 const ROUTE_CODE_TTL_MS = 16 * 60 * 60 * 1000;
 const UNAVAILABLE_MESSAGE =
@@ -151,7 +152,7 @@ export class RouteProtectionService {
   }
 
   private generateCode(): string {
-    return Math.floor(100000 + Math.random() * 900000).toString();
+    return randomInt(100000, 1000000).toString();
   }
 
   private getComicCacheKey(comicId: number): string {

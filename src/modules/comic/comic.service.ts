@@ -5,8 +5,22 @@ import { comics, comicGenres, genres, comicScans, chapters, comicViewsHistory } 
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '@/database/schema';
 import { CacheService, CACHE_TTL, CACHE_KEYS } from '@/cache/cache.service';
-import { ADULT_GENRE_SLUGS } from '@/modules/scraper/adapters/base.adapter';
 import { RouteProtectionService } from '@/modules/route-protection/route-protection.service';
+
+// Adult genre slugs - used to automatically mark comics as NSFW
+// Note: ecchi and smut are NOT considered adult content
+export const ADULT_GENRE_SLUGS = [
+  '18',           // +18
+  'adulto',       // Adulto
+  'maduro',       // Maduro
+  'boys-love',    // Boys Love
+  'girls-love',   // Girls Love
+  'hentai',       // Hentai
+  'yaoi',         // Yaoi
+  'yuri',         // Yuri
+  'erotico',      // Erótico
+  'gore',         // Gore (mature content)
+];
 
 export interface ComicFilters {
   search?: string;

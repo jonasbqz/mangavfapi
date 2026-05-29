@@ -3,22 +3,15 @@ import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { bearer } from 'better-auth/plugins/bearer';
 import { APIError } from 'better-call';
-import { Pool } from 'pg';
 import * as schema from '@/database/schema';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import {
   getAllowedPersonalEmailDomainsLabel,
   isAllowedPersonalEmailDomain,
 } from '@/lib/email-policy';
+import { getSharedPool } from '@/lib/db-pool';
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  max: Number(process.env.AUTH_DB_POOL_MAX || 5),
-  idleTimeoutMillis: Number(process.env.DB_IDLE_TIMEOUT_MS || 30000),
-  connectionTimeoutMillis: Number(process.env.DB_CONNECTION_TIMEOUT_MS || 10000),
-});
-
-const db = drizzle(pool, { schema });
+const db = drizzle(getSharedPool(), { schema });
 const authBaseUrl = process.env.BASE_URL || 'http://localhost:8085';
 const isLocalAuthBaseUrl =
   authBaseUrl.includes('localhost') || authBaseUrl.includes('127.0.0.1');
@@ -84,7 +77,6 @@ export const auth = betterAuth({
     ]),
     'https://mangolibreria.com',
     'https://www.mangolibreria.com',
-    'http://mangas-mainmango-3i1hl5:8087',
   ],
   advanced: {
     defaultCookieAttributes: {

@@ -1,5 +1,5 @@
 import { Injectable, Inject, NotFoundException } from '@nestjs/common';
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, desc, sql, inArray } from 'drizzle-orm';
 import { DATABASE_CONNECTION } from '@/database/database.module';
 import { readingHistory } from '@/database/schema';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
@@ -104,29 +104,42 @@ export class ReadingHistoryService {
       .offset(safeOffset);
 
     const pageComics = groupedComics.slice(0, safeLimit);
+    const comicIds = pageComics.map((c) => c.comicId);
 
-    const items = await Promise.all(
-      pageComics.map(async (comicHistory) => {
-        const entries = await this.db.query.readingHistory.findMany({
-          where: and(
-            eq(readingHistory.profileId, profileId),
-            eq(readingHistory.comicId, comicHistory.comicId),
-          ),
-          orderBy: [desc(readingHistory.readAt)],
-          limit: safeChaptersLimit,
-          with: {
-            comic: true,
-            chapter: true,
-          },
-        });
+    let allEntries: Array<(typeof readingHistory.$inferSelect) & {
+      comic?: typeof schema.comics.$inferSelect | null;
+      chapter?: typeof schema.chapters.$inferSelect | null;
+    }> = [];
 
-        return {
-          comicId: comicHistory.comicId,
-          lastReadAt: comicHistory.lastReadAt,
-          entries,
-        };
-      }),
-    );
+    if (comicIds.length > 0) {
+      allEntries = await this.db.query.readingHistory.findMany({
+        where: and(
+          eq(readingHistory.profileId, profileId),
+          inArray(readingHistory.comicId, comicIds),
+        ),
+        orderBy: [desc(readingHistory.readAt)],
+        with: {
+          comic: true,
+          chapter: true,
+        },
+      });
+    }
+
+    // Group entries by comicId in memory, respecting chaptersLimit per comic
+    const entriesByComic = new Map<number, typeof allEntries>();
+    for (const entry of allEntries) {
+      const list = entriesByComic.get(entry.comicId) || [];
+      if (list.length < safeChaptersLimit) {
+        list.push(entry);
+      }
+      entriesByComic.set(entry.comicId, list);
+    }
+
+    const items = pageComics.map((comicHistory) => ({
+      comicId: comicHistory.comicId,
+      lastReadAt: comicHistory.lastReadAt,
+      entries: entriesByComic.get(comicHistory.comicId) || [],
+    }));
 
     return {
       items,

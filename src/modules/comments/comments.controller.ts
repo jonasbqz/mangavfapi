@@ -3,7 +3,6 @@ import {
   Controller,
   Delete,
   Get,
-  Inject,
   Param,
   ParseIntPipe,
   ParseUUIDPipe,
@@ -18,7 +17,7 @@ import type { FastifyRequest } from 'fastify';
 import { AuthGuard } from '@/modules/auth/auth.guard';
 import { ProfileGuard } from '@/modules/auth/profile.guard';
 import { CurrentUser, UserSession } from '@/modules/auth/current-user.decorator';
-import { resolveOptionalProfileId } from '@/modules/auth/session-resolver';
+import { SessionResolverService } from '@/modules/auth/session-resolver';
 import { CommentsService } from './comments.service';
 import {
   CreateCommentDto,
@@ -26,17 +25,13 @@ import {
   UpdateCommentDto,
   VoteCommentDto,
 } from './comments.dto';
-import { DATABASE_CONNECTION } from '@/database/database.module';
-import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import type * as schema from '@/database/schema';
 
 @ApiTags('Comments')
 @Controller('comments')
 export class CommentsController {
   constructor(
     private readonly commentsService: CommentsService,
-    @Inject(DATABASE_CONNECTION)
-    private readonly db: NodePgDatabase<typeof schema>,
+    private readonly sessionResolver: SessionResolverService,
   ) {}
 
   @Post()
@@ -60,8 +55,7 @@ export class CommentsController {
     @Query() query: GetCommentsQueryDto,
     @Req() request: FastifyRequest,
   ) {
-    const viewerProfileId = await resolveOptionalProfileId(
-      this.db,
+    const viewerProfileId = await this.sessionResolver.resolveOptionalProfileId(
       request.headers as Record<string, any>,
     );
     return this.commentsService.findByComic(comicId, query, viewerProfileId);
@@ -77,8 +71,7 @@ export class CommentsController {
     @Query() query: GetCommentsQueryDto,
     @Req() request: FastifyRequest,
   ) {
-    const viewerProfileId = await resolveOptionalProfileId(
-      this.db,
+    const viewerProfileId = await this.sessionResolver.resolveOptionalProfileId(
       request.headers as Record<string, any>,
     );
     return this.commentsService.findByChapter(chapterId, query, viewerProfileId);
@@ -94,8 +87,7 @@ export class CommentsController {
     @Query() query: GetCommentsQueryDto,
     @Req() request: FastifyRequest,
   ) {
-    const viewerProfileId = await resolveOptionalProfileId(
-      this.db,
+    const viewerProfileId = await this.sessionResolver.resolveOptionalProfileId(
       request.headers as Record<string, any>,
     );
     return this.commentsService.findReplies(parentId, query, viewerProfileId);
@@ -134,8 +126,7 @@ export class CommentsController {
     @Param('id', ParseUUIDPipe) id: string,
     @Req() request: FastifyRequest,
   ) {
-    const viewerProfileId = await resolveOptionalProfileId(
-      this.db,
+    const viewerProfileId = await this.sessionResolver.resolveOptionalProfileId(
       request.headers as Record<string, any>,
     );
     return this.commentsService.findById(id, viewerProfileId);

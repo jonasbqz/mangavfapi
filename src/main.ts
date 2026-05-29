@@ -6,10 +6,12 @@ import {
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import fastifyCookie from '@fastify/cookie';
+import fastifyHelmet from '@fastify/helmet';
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { AppModule } from './app.module';
 import { SanitizePipe } from './common/pipes';
 import { SanitizeInterceptor } from './common/interceptors';
+import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { auth } from './lib/auth';
 import { toNodeHandler } from 'better-auth/node';
 import { getRequestClientIp } from './common/network/client-ip';
@@ -79,7 +81,7 @@ async function bootstrap() {
     AppModule,
     new FastifyAdapter({
       trustProxy: true,
-      bodyLimit: 25 * 1024 * 1024,
+      bodyLimit: 10 * 1024 * 1024,
     }),
     { rawBody: true },
   );
@@ -87,18 +89,39 @@ async function bootstrap() {
   (app.getHttpAdapter() as unknown as FastifyAdapter).useBodyParser(
     'application/json',
     true,
-    { bodyLimit: 25 * 1024 * 1024 },
+    { bodyLimit: 10 * 1024 * 1024 },
     (_request: FastifyRequest, body: Buffer, done: (error: Error | null, body?: unknown) => void) =>
       parseJsonBody(body, done),
   );
 
   // Register cookie plugin for better-auth sessions
+  const cookieSecret = process.env.COOKIE_SECRET;
+  if (!cookieSecret && process.env.NODE_ENV === 'production') {
+    throw new Error('[security] COOKIE_SECRET environment variable is required in production');
+  }
   await app.register(fastifyCookie, {
-    secret: process.env.COOKIE_SECRET || 'super-secret-cookie-key',
+    secret: cookieSecret || crypto.randomUUID(),
+  });
+
+  // Security headers via helmet (CSP, HSTS, X-Frame-Options, etc.)
+  await app.register(fastifyHelmet, {
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:', 'https:'],
+        connectSrc: ["'self'"],
+        fontSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        frameAncestors: ["'self'"],
+      },
+    },
+    crossOriginEmbedderPolicy: false,
   });
 
   app.enableCors({
-    origin: process.env.CORS_ORIGIN?.split(',') || ['https://mangolibreria.com', 'http://localhost:3000','https://api.mangasx.online','http://mangas-mainmango-3i1hl5:8087'],
+    origin: process.env.CORS_ORIGIN?.split(',') || ['https://mangolibreria.com', 'http://localhost:3000'],
     credentials: true,
   });
 
@@ -128,6 +151,9 @@ async function bootstrap() {
 
   // Global interceptor: Sanitize query and path params
   app.useGlobalInterceptors(new SanitizeInterceptor());
+
+  // Global filter: structured error responses with timestamp
+  app.useGlobalFilters(new HttpExceptionFilter());
 
   // Global pipes: Sanitize body first, then validate
   app.useGlobalPipes(
