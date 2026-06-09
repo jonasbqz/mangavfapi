@@ -60,6 +60,15 @@ Señales de patrón:
 - `BOT_ALLOW_IPS`, `BOT_ALLOW_IP_CIDRS`, `BOT_ALLOW_ASNS`: redes de confianza que nunca se bloquean.
 - También se aceptan alias: `SUSPICIOUS_IP_CIDRS`, `BOT_DATACENTER_IP_CIDRS`, `SUSPICIOUS_ASNS` o `BOT_DATACENTER_ASNS`.
 
+## Búsquedas (`429`)
+
+El rate limit de búsqueda ya no trata la paginación igual que una búsqueda nueva:
+
+- `page > 1` con el mismo término usa un bucket de paginación más amplio (`SEARCH_RATE_PAGINATION_PER_30S`, default `50` / 30s).
+- un término nuevo usa `SEARCH_RATE_NEW_PER_MINUTE` (default `20` / min).
+- refrescar la misma búsqueda en página 1 usa `SEARCH_RATE_SAME_QUERY_REFRESH_PER_30S` (default `20` / 30s).
+- si el usuario abrió cómics/capítulos recientemente (`human:*:engaged`) o está autenticado, los límites se multiplican.
+
 ## Bloqueo inline
 
 El sistema ya no espera a que el panel muestre eventos: cada request actualiza contadores en Redis y puede devolver 404 inmediatamente cuando:

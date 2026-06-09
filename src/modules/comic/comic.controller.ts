@@ -78,8 +78,11 @@ export class ComicController {
     @Query('isDesc') isDesc?: string,
     @Req() request?: FastifyRequest,
   ) {
+    const parsedPage = page ? parseInt(page, 10) : 1;
     const inspection = request
-      ? await this.searchAbuseService.inspectSearch(search, request)
+      ? await this.searchAbuseService.inspectSearch(search, request, {
+          page: Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1,
+        })
       : { action: 'allow' as const, search: search?.trim() || '' };
 
     if (inspection.action === 'reject') {

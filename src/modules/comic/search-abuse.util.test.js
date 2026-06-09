@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
   containsBlockedSearchScript,
+  hashSearchQueryKey,
   normalizeSearchQuery,
 } from './search-abuse.util';
 
@@ -27,5 +28,9 @@ describe('search-abuse util', () => {
   it('allows latin searches', () => {
     expect(containsBlockedSearchScript('solo leveling')).toBe(false);
     expect(containsBlockedSearchScript('one piece')).toBe(false);
+  });
+
+  it('hashes normalized search keys consistently', () => {
+    expect(hashSearchQueryKey(' Solo Leveling ')).toBe(hashSearchQueryKey('solo leveling'));
   });
 });

@@ -183,6 +183,7 @@ export class TrafficEventsService {
       eventType: input.eventType,
       path,
       searchQuery: input.searchQuery,
+      metadata: input.metadata,
     });
 
     const riskScore = Math.min(
@@ -532,6 +533,7 @@ export class TrafficEventsService {
     eventType: TrafficEventType;
     path: string;
     searchQuery?: string | null;
+    metadata?: Record<string, unknown>;
   }): Promise<CounterSignals> {
     const keySubject = input.clientIp || 'unknown';
     const thirtySecondEvents = await this.incrementCounter(
@@ -552,8 +554,13 @@ export class TrafficEventsService {
     let uniqueSearches10m = 0;
     let riskScore = 0;
     const reasons: string[] = [];
+    const page = Number(input.metadata?.page);
+    const isSearchPagination =
+      input.eventType === 'comic_search' &&
+      Number.isFinite(page) &&
+      page > 1;
 
-    if (input.eventType === 'comic_search') {
+    if (input.eventType === 'comic_search' && !isSearchPagination) {
       thirtySecondSearches = await this.incrementCounter(
         `traffic:${keySubject}:searches:30s`,
         30 * 1000,
@@ -581,6 +588,7 @@ export class TrafficEventsService {
         `traffic:${keySubject}:content:1m`,
         60 * 1000,
       );
+      await this.markHumanEngagement(keySubject);
     }
 
     if (input.path) {
@@ -692,6 +700,11 @@ export class TrafficEventsService {
       riskScore,
       reasons,
     };
+  }
+
+  private async markHumanEngagement(subjectKey: string): Promise<void> {
+    const ttlMs = this.readIntConfig('SEARCH_ENGAGEMENT_TTL_MS', 5 * 60 * 1000);
+    await this.cacheService.set(`human:${subjectKey}:engaged`, true, ttlMs);
   }
 
   private async incrementCounter(key: string, ttlMs: number): Promise<number> {
