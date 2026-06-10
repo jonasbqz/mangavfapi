@@ -93,6 +93,26 @@ export class CommentsController {
     return this.commentsService.findReplies(parentId, query, viewerProfileId);
   }
 
+  @Get('user/activity')
+  @UseGuards(AuthGuard, ProfileGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get comment activity for current user' })
+  @ApiQuery({ name: 'view', required: false, enum: ['mine', 'replies'] })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'offset', required: false, type: Number })
+  async findUserActivity(
+    @CurrentUser() user: UserSession,
+    @Query('view') view?: 'mine' | 'replies',
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.commentsService.findUserActivity(user.profileId!, {
+      view,
+      limit: limit ? parseInt(limit, 10) : 20,
+      offset: offset ? parseInt(offset, 10) : 0,
+    });
+  }
+
   @Get('user')
   @UseGuards(AuthGuard, ProfileGuard)
   @ApiBearerAuth()

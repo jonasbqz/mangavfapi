@@ -13,7 +13,9 @@ import {
   eq,
   inArray,
   isNull,
+  ne,
 } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { DATABASE_CONNECTION } from '@/database/database.module';
 import {
   commentAttachments,
@@ -29,6 +31,7 @@ import {
 } from './comments.dto';
 import { MediaService } from '@/modules/media/media.service';
 import { StorageService } from '@/modules/media/storage.service';
+import { RouteProtectionService } from '@/modules/route-protection/route-protection.service';
 
 type CommentSortMode = NonNullable<GetCommentsQueryDto['sort']>;
 
@@ -49,6 +52,7 @@ export class CommentsService {
     private db: NodePgDatabase<typeof schema>,
     private readonly mediaService: MediaService,
     private readonly storageService: StorageService,
+    private readonly routeProtectionService: RouteProtectionService,
   ) {}
 
   private buildOrderBy(sort: CommentSortMode) {
@@ -518,6 +522,324 @@ export class CommentsService {
         },
       },
     });
+  }
+
+  private mapActivityComment(
+    comment: any,
+    viewerVotes: Map<string, -1 | 1>,
+    replyCounts: Map<string, number>,
+    paths?: { comicPath?: string | null; chapterPath?: string | null },
+  ) {
+    const mapped = this.mapComment(comment, viewerVotes, replyCounts);
+    const comicPath = paths?.comicPath ?? null;
+    const chapterPath = paths?.chapterPath ?? null;
+
+    return {
+      ...mapped,
+      comic: comment.comic
+        ? {
+            id: comment.comic.id,
+            title: comment.comic.title,
+            slug: comment.comic.slug,
+            coverImage: comment.comic.coverImage,
+            comicPath,
+          }
+        : null,
+      chapter: comment.chapter
+        ? {
+            id: comment.chapter.id,
+            chapterNumber: comment.chapter.chapterNumber,
+            slug: comment.chapter.slug,
+            chapterPath,
+          }
+        : null,
+      targetPath: chapterPath ?? comicPath,
+      parentComment: comment.parent
+        ? {
+            id: comment.parent.id,
+            content: comment.parent.content,
+            profile: comment.parent.profile
+              ? {
+                  id: comment.parent.profile.id,
+                  username: comment.parent.profile.username,
+                  visibleName: comment.parent.profile.visibleName,
+                  avatarUrl: comment.parent.profile.avatarUrl,
+                }
+              : null,
+          }
+        : null,
+      isReply: Boolean(comment.parentId),
+    };
+  }
+
+  private async resolveActivityPaths(comment: {
+    comic?: {
+      id: number;
+      slug: string;
+      protectedRouteEnabled?: boolean | null;
+    } | null;
+    chapter?: { id: number } | null;
+  }) {
+    if (!comment.comic) {
+      return { comicPath: null, chapterPath: null };
+    }
+
+    const comicPath = await this.routeProtectionService.getComicPath(comment.comic);
+    const chapterPath = comment.chapter
+      ? await this.routeProtectionService.getChapterPath(
+          comment.comic,
+          comment.chapter,
+          { comicPath },
+        )
+      : null;
+
+    return { comicPath, chapterPath };
+  }
+
+  private async mapActivityCommentsWithPaths(
+    items: any[],
+    viewerVotes: Map<string, -1 | 1>,
+    replyCounts: Map<string, number>,
+  ) {
+    return Promise.all(
+      items.map(async (item) => {
+        const paths = await this.resolveActivityPaths(item);
+        return this.mapActivityComment(item, viewerVotes, replyCounts, paths);
+      }),
+    );
+  }
+
+  private async countRepliesToUser(profileId: string): Promise<number> {
+    const parentComment = alias(comments, 'parent_comment');
+
+    const [result] = await this.db
+      .select({ count: count() })
+      .from(comments)
+      .innerJoin(parentComment, eq(comments.parentId, parentComment.id))
+      .where(
+        and(
+          eq(parentComment.profileId, profileId),
+          ne(comments.profileId, profileId),
+        ),
+      );
+
+    return Number(result?.count ?? 0);
+  }
+
+  async getUserActivitySummary(profileId: string) {
+    const [myCommentsCount, repliesToMeCount] = await Promise.all([
+      this.getUserCommentsCount(profileId),
+      this.countRepliesToUser(profileId),
+    ]);
+
+    return {
+      myCommentsCount,
+      repliesToMeCount,
+    };
+  }
+
+  async findUserActivity(
+    profileId: string,
+    options: {
+      view?: 'mine' | 'replies';
+      limit?: number;
+      offset?: number;
+    } = {},
+  ) {
+    const limit = Math.max(1, Math.min(options.limit ?? 20, 50));
+    const offset = Math.max(0, options.offset ?? 0);
+    const view = options.view === 'replies' ? 'replies' : 'mine';
+
+    const summary = await this.getUserActivitySummary(profileId);
+
+    if (view === 'replies') {
+      return this.findRepliesToUser(profileId, limit, offset, summary);
+    }
+
+    return this.findUserCommentsActivity(profileId, limit, offset, summary);
+  }
+
+  private async findUserCommentsActivity(
+    profileId: string,
+    limit: number,
+    offset: number,
+    summary: { myCommentsCount: number; repliesToMeCount: number },
+  ) {
+    const [items, totalRows] = await Promise.all([
+      this.db.query.comments.findMany({
+        where: eq(comments.profileId, profileId),
+        orderBy: [desc(comments.createdAt)],
+        limit,
+        offset,
+        with: {
+          profile: {
+            columns: publicProfileColumns,
+          },
+          attachments: {
+            orderBy: [asc(commentAttachments.sortOrder)],
+            with: {
+              mediaAsset: true,
+            },
+          },
+          comic: {
+            columns: {
+              id: true,
+              title: true,
+              slug: true,
+              coverImage: true,
+              protectedRouteEnabled: true,
+            },
+          },
+          chapter: {
+            columns: {
+              id: true,
+              chapterNumber: true,
+              slug: true,
+            },
+          },
+          parent: {
+            columns: {
+              id: true,
+              content: true,
+              profileId: true,
+            },
+            with: {
+              profile: {
+                columns: publicProfileColumns,
+              },
+            },
+          },
+        },
+      }),
+      this.db
+        .select({ count: count() })
+        .from(comments)
+        .where(eq(comments.profileId, profileId)),
+    ]);
+
+    const topLevelIds = items
+      .filter((item) => !item.parentId)
+      .map((item) => item.id);
+    const replyCounts = await this.getReplyCounts(topLevelIds);
+    const viewerVotes = await this.getViewerVotes(
+      items.map((item) => item.id),
+      profileId,
+    );
+
+    const total = Number(totalRows[0]?.count ?? 0);
+
+    return {
+      view: 'mine' as const,
+      summary,
+      items: await this.mapActivityCommentsWithPaths(
+        items,
+        viewerVotes,
+        replyCounts,
+      ),
+      total,
+      hasMore: offset + items.length < total,
+      nextOffset: offset + items.length,
+    };
+  }
+
+  private async findRepliesToUser(
+    profileId: string,
+    limit: number,
+    offset: number,
+    summary: { myCommentsCount: number; repliesToMeCount: number },
+  ) {
+    const parentComment = alias(comments, 'parent_comment');
+    const total = summary.repliesToMeCount;
+
+    const replyIdRows = await this.db
+      .select({ id: comments.id })
+      .from(comments)
+      .innerJoin(parentComment, eq(comments.parentId, parentComment.id))
+      .where(
+        and(
+          eq(parentComment.profileId, profileId),
+          ne(comments.profileId, profileId),
+        ),
+      )
+      .orderBy(desc(comments.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    const ids = replyIdRows.map((row) => row.id);
+    if (ids.length === 0) {
+      return {
+        view: 'replies' as const,
+        summary,
+        items: [],
+        total,
+        hasMore: false,
+        nextOffset: offset,
+      };
+    }
+
+    const items = await this.db.query.comments.findMany({
+      where: inArray(comments.id, ids),
+      with: {
+        profile: {
+          columns: publicProfileColumns,
+        },
+        attachments: {
+          orderBy: [asc(commentAttachments.sortOrder)],
+          with: {
+            mediaAsset: true,
+          },
+        },
+        comic: {
+          columns: {
+            id: true,
+            title: true,
+            slug: true,
+            coverImage: true,
+            protectedRouteEnabled: true,
+          },
+        },
+        chapter: {
+          columns: {
+            id: true,
+            chapterNumber: true,
+            slug: true,
+          },
+        },
+        parent: {
+          columns: {
+            id: true,
+            content: true,
+            profileId: true,
+          },
+          with: {
+            profile: {
+              columns: publicProfileColumns,
+            },
+          },
+        },
+      },
+    });
+
+    const orderMap = new Map(ids.map((id, index) => [id, index]));
+    items.sort(
+      (first, second) =>
+        (orderMap.get(first.id) ?? 0) - (orderMap.get(second.id) ?? 0),
+    );
+
+    const viewerVotes = await this.getViewerVotes(ids, profileId);
+
+    return {
+      view: 'replies' as const,
+      summary,
+      items: await this.mapActivityCommentsWithPaths(
+        items,
+        viewerVotes,
+        new Map(),
+      ),
+      total,
+      hasMore: offset + items.length < total,
+      nextOffset: offset + items.length,
+    };
   }
 
   async update(profileId: string, commentId: string, dto: UpdateCommentDto) {
