@@ -125,7 +125,13 @@ async function bootstrap() {
   app.enableCors({
     origin: corsOrigins.length
       ? corsOrigins
-      : ['https://mangolibreria.com', 'https://www.mangolibreria.com', 'http://localhost:3000'],
+      : [
+          'https://mangolibreria.com',
+          'https://www.mangolibreria.com',
+          'https://download.mangolibreria.com',
+          'http://localhost:3000',
+          'http://localhost:5499',
+        ],
     credentials: true,
   });
 

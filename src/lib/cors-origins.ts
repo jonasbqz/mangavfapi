@@ -9,7 +9,9 @@ export function parseTrustedRefererOrigins(value?: string | null): string[] {
   const defaults = [
     'https://mangolibreria.com',
     'https://www.mangolibreria.com',
+    'https://download.mangolibreria.com',
     'http://localhost:3000',
+    'http://localhost:5499',
   ];
 
   const configured = parseCorsOrigins(value);
