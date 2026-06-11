@@ -184,7 +184,7 @@ export function inspectTrafficEvent(input: TrafficInspectionInput): TrafficInspe
   }
 
   if (!isAllowedNetwork && isIpInAnyCidr(input.clientIp, input.watchCidrs)) {
-    riskScore += 35;
+    riskScore += 20;
     reasons.push('watchlisted_datacenter_ip');
   }
 
@@ -194,7 +194,7 @@ export function inspectTrafficEvent(input: TrafficInspectionInput): TrafficInspe
     Array.isArray(input.watchAsns) &&
     input.watchAsns.includes(input.clientAsn)
   ) {
-    riskScore += 35;
+    riskScore += 20;
     reasons.push('watchlisted_datacenter_asn');
   }
 
@@ -241,11 +241,21 @@ export function inspectTrafficEvent(input: TrafficInspectionInput): TrafficInspe
     input.trustedRefererOrigins.length > 0
   ) {
     if (!input.referer?.trim()) {
-      riskScore += 20;
-      reasons.push('missing_referer');
+      if (!input.userId) {
+        riskScore += 20;
+        reasons.push('missing_referer');
+      } else {
+        riskScore += 5;
+        reasons.push('missing_referer_authenticated');
+      }
     } else if (!isTrustedRefererOrigin(input.referer, input.trustedRefererOrigins)) {
-      riskScore += 25;
-      reasons.push('untrusted_referer');
+      if (!input.userId) {
+        riskScore += 25;
+        reasons.push('untrusted_referer');
+      } else {
+        riskScore += 8;
+        reasons.push('untrusted_referer_authenticated');
+      }
     }
   }
 

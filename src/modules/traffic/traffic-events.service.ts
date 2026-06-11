@@ -68,8 +68,14 @@ const DEFAULT_AGGREGATE_RETENTION_DAYS = 30;
 const DEFAULT_BLOCK_TTL_HOURS = 1;
 const DEFAULT_MAX_REQUESTS_PER_30S = 200;
 const DEFAULT_MAX_SEARCHES_PER_30S = 10;
-const DEFAULT_BLOCK_MAX_REQUESTS_PER_30S = 250;
-const DEFAULT_BLOCK_MAX_SEARCHES_PER_30S = 25;
+const DEFAULT_BLOCK_MAX_REQUESTS_PER_30S = 400;
+const DEFAULT_BLOCK_MAX_SEARCHES_PER_30S = 35;
+const DEFAULT_HUMAN_BLOCK_BONUS_MULTIPLIER = 2;
+const DEFAULT_AUTHENTICATED_BLOCK_BONUS_MULTIPLIER = 2;
+const LOOKUP_EVENT_TYPES = new Set<TrafficEventType>([
+  'comic_lookup',
+  'chapter_lookup',
+]);
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 const DEFAULT_BLOCKED_SUBJECTS_LIMIT = 100;
 const MAX_BLOCKED_SUBJECTS_LIMIT = 500;
@@ -201,6 +207,7 @@ export class TrafficEventsService {
       path,
       searchQuery: input.searchQuery,
       metadata: input.metadata,
+      userId,
     });
 
     const riskScore = Math.min(
@@ -210,11 +217,13 @@ export class TrafficEventsService {
     const reasons = Array.from(
       new Set([...staticInspection.reasons, ...counters.reasons]),
     );
-    let shouldBlock = this.shouldBlockRequest({
+    let shouldBlock = await this.shouldBlockRequest({
       action: input.action,
       counters,
       staticInspection,
       riskScore,
+      userId,
+      clientIp,
     });
     if (shouldBlock && await this.isManuallyUnblockedSubject(subjectKey)) {
       shouldBlock = false;
@@ -287,7 +296,7 @@ export class TrafficEventsService {
     return new NotFoundException('Not found');
   }
 
-  private shouldBlockRequest(input: {
+  private async shouldBlockRequest(input: {
     action?: TrafficAction;
     counters: CounterSignals;
     staticInspection: {
@@ -297,7 +306,9 @@ export class TrafficEventsService {
       isWatchlistedDatacenter: boolean;
     };
     riskScore: number;
-  }): boolean {
+    userId?: string | null;
+    clientIp?: string | null;
+  }): Promise<boolean> {
     if (input.action === 'rate_limited') {
       return true;
     }
@@ -314,14 +325,44 @@ export class TrafficEventsService {
       return false;
     }
 
-    // Do not create 24h fake-404 blocks from normal rate-limit signals. Search abuse
-    // can happen accidentally through autocomplete/debounce issues or impatient users,
-    // so it should normally return 429 only. Temporary bot blocks are reserved for hard
-    // burst thresholds that are far above human behavior.
-    return (
-      input.counters.reasons.includes('hard_request_burst_30s') ||
-      input.counters.reasons.includes('hard_search_burst_30s')
+    const ipKey = input.clientIp || 'unknown';
+    const limitMultiplier = await this.resolveBlockLimitMultiplier(
+      ipKey,
+      input.userId,
     );
+    const blockMaxRequestsPer30s = Math.ceil(
+      this.readIntConfig(
+        'BOT_BLOCK_MAX_REQUESTS_PER_30S',
+        DEFAULT_BLOCK_MAX_REQUESTS_PER_30S,
+      ) * limitMultiplier,
+    );
+    const blockMaxSearchesPer30s = Math.ceil(
+      this.readIntConfig(
+        'BOT_BLOCK_MAX_SEARCHES_PER_30S',
+        DEFAULT_BLOCK_MAX_SEARCHES_PER_30S,
+      ) * limitMultiplier,
+    );
+
+    const hardSearchBurst =
+      input.counters.thirtySecondSearches > blockMaxSearchesPer30s;
+    const hardRequestBurst =
+      input.counters.thirtySecondEvents > blockMaxRequestsPer30s;
+    const isHumanEngaged = await this.hasRecentHumanEngagement(ipKey);
+
+    // Authenticated readers bingeing chapters should not get fake-404 blocks from
+    // request volume alone. Search bursts remain protected even when logged in.
+    if (hardSearchBurst) {
+      return true;
+    }
+
+    if (hardRequestBurst) {
+      if (isHumanEngaged) {
+        return false;
+      }
+      return true;
+    }
+
+    return false;
   }
 
   private isAllowedInfrastructure(
@@ -551,16 +592,22 @@ export class TrafficEventsService {
     path: string;
     searchQuery?: string | null;
     metadata?: Record<string, unknown>;
+    userId?: string | null;
   }): Promise<CounterSignals> {
     const keySubject = input.clientIp || 'unknown';
-    const thirtySecondEvents = await this.incrementCounter(
-      `traffic:${keySubject}:events:30s`,
-      30 * 1000,
-    );
-    const minuteEvents = await this.incrementCounter(
-      `traffic:${keySubject}:events:1m`,
-      60 * 1000,
-    );
+    const isLookupEvent = LOOKUP_EVENT_TYPES.has(input.eventType);
+    const thirtySecondEvents = isLookupEvent
+      ? 0
+      : await this.incrementCounter(
+          `traffic:${keySubject}:events:30s`,
+          30 * 1000,
+        );
+    const minuteEvents = isLookupEvent
+      ? 0
+      : await this.incrementCounter(
+          `traffic:${keySubject}:events:1m`,
+          60 * 1000,
+        );
 
     let thirtySecondSearches = 0;
     let minuteSearches = 0;
@@ -629,13 +676,21 @@ export class TrafficEventsService {
       'BOT_MAX_SEARCHES_PER_30S',
       DEFAULT_MAX_SEARCHES_PER_30S,
     );
-    const blockMaxRequestsPer30s = this.readIntConfig(
-      'BOT_BLOCK_MAX_REQUESTS_PER_30S',
-      DEFAULT_BLOCK_MAX_REQUESTS_PER_30S,
+    const limitMultiplier = await this.resolveBlockLimitMultiplier(
+      keySubject,
+      input.userId,
     );
-    const blockMaxSearchesPer30s = this.readIntConfig(
-      'BOT_BLOCK_MAX_SEARCHES_PER_30S',
-      DEFAULT_BLOCK_MAX_SEARCHES_PER_30S,
+    const blockMaxRequestsPer30s = Math.ceil(
+      this.readIntConfig(
+        'BOT_BLOCK_MAX_REQUESTS_PER_30S',
+        DEFAULT_BLOCK_MAX_REQUESTS_PER_30S,
+      ) * limitMultiplier,
+    );
+    const blockMaxSearchesPer30s = Math.ceil(
+      this.readIntConfig(
+        'BOT_BLOCK_MAX_SEARCHES_PER_30S',
+        DEFAULT_BLOCK_MAX_SEARCHES_PER_30S,
+      ) * limitMultiplier,
     );
     if (thirtySecondEvents > maxRequestsPer30s) {
       riskScore += 50;
@@ -646,11 +701,9 @@ export class TrafficEventsService {
       reasons.push('too_many_searches_30s');
     }
     if (thirtySecondEvents > blockMaxRequestsPer30s) {
-      riskScore += 50;
       reasons.push('hard_request_burst_30s');
     }
     if (thirtySecondSearches > blockMaxSearchesPer30s) {
-      riskScore += 50;
       reasons.push('hard_search_burst_30s');
     }
 
@@ -722,6 +775,52 @@ export class TrafficEventsService {
   private async markHumanEngagement(subjectKey: string): Promise<void> {
     const ttlMs = this.readIntConfig('SEARCH_ENGAGEMENT_TTL_MS', 5 * 60 * 1000);
     await this.cacheService.set(`human:${subjectKey}:engaged`, true, ttlMs);
+  }
+
+  private async hasRecentHumanEngagement(ipKey: string): Promise<boolean> {
+    const engaged = await this.cacheService.get<boolean>(`human:${ipKey}:engaged`);
+    if (engaged) {
+      return true;
+    }
+
+    const recentContentViews = Number(
+      (await this.cacheService.get<number>(`traffic:${ipKey}:content:1m`)) || 0,
+    );
+    return recentContentViews > 0;
+  }
+
+  private async resolveBlockLimitMultiplier(
+    ipKey: string,
+    userId?: string | null,
+  ): Promise<number> {
+    const isHumanEngaged = await this.hasRecentHumanEngagement(ipKey);
+    return this.getBlockLimitMultiplier({
+      isHumanEngaged,
+      isAuthenticated: Boolean(userId),
+    });
+  }
+
+  private getBlockLimitMultiplier(input: {
+    isHumanEngaged: boolean;
+    isAuthenticated: boolean;
+  }): number {
+    let multiplier = 1;
+
+    if (input.isHumanEngaged) {
+      multiplier *= this.readIntConfig(
+        'BOT_HUMAN_ENGAGEMENT_BONUS',
+        DEFAULT_HUMAN_BLOCK_BONUS_MULTIPLIER,
+      );
+    }
+
+    if (input.isAuthenticated) {
+      multiplier *= this.readIntConfig(
+        'BOT_AUTHENTICATED_BONUS',
+        DEFAULT_AUTHENTICATED_BLOCK_BONUS_MULTIPLIER,
+      );
+    }
+
+    return Math.max(1, multiplier);
   }
 
   private async incrementCounter(key: string, ttlMs: number): Promise<number> {

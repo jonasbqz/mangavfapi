@@ -152,4 +152,26 @@ describe('bot detection util', () => {
     expect(result.reasons).not.toContain('missing_referer');
     expect(result.reasons).not.toContain('untrusted_referer');
   });
+
+  it('softens missing referer penalties for authenticated users', () => {
+    const anonymous = inspectTrafficEvent({
+      eventType: 'comic_view',
+      userAgent: 'Mozilla/5.0',
+      clientIp: '203.0.113.10',
+      trustedRefererOrigins: ['https://mangolibreria.com'],
+      hasInternalAccess: false,
+    });
+    const authenticated = inspectTrafficEvent({
+      eventType: 'comic_view',
+      userAgent: 'Mozilla/5.0',
+      clientIp: '203.0.113.10',
+      userId: 'user-123',
+      trustedRefererOrigins: ['https://mangolibreria.com'],
+      hasInternalAccess: false,
+    });
+
+    expect(anonymous.reasons).toContain('missing_referer');
+    expect(authenticated.reasons).toContain('missing_referer_authenticated');
+    expect(authenticated.riskScore).toBeLessThan(anonymous.riskScore);
+  });
 });
