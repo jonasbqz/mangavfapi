@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Interval } from '@nestjs/schedule';
 import type { FastifyRequest } from 'fastify';
@@ -423,40 +423,98 @@ export class TrafficEventsService {
     const hours = Math.min(Math.max(filters.hours || 24, 1), 24 * 30);
     const limit = Math.min(Math.max(filters.limit || 100, 1), 500);
 
-    const rows = await this.db.execute(sql`
-      select
-        subject_key as "subjectKey",
-        max(client_ip) as "clientIp",
-        max(client_asn) as "clientAsn",
-        max(user_id) as "userId",
-        count(distinct user_id)::int as "userCount",
-        max(user_agent) as "lastUserAgent",
-        max(last_path) as "lastPath",
-        min(first_seen_at) as "firstSeenAt",
-        max(last_seen_at) as "lastSeenAt",
-        sum(total_events)::int as "events",
-        sum(search_events)::int as "searches",
-        sum(content_events)::int as "contentViews",
-        sum(lookup_events)::int as "lookupEvents",
-        sum(unique_path_hits)::int as "uniquePaths",
-        sum(unique_search_hits)::int as "uniqueSearches",
-        max(max_risk_score)::int as "maxRiskScore",
-        (sum(risk_score_sum)::float / nullif(sum(risk_samples), 0))::float as "avgRiskScore",
-        jsonb_agg(distinct reason.value) filter (where reason.value is not null) as reasons
-      from traffic_subject_windows
-      left join lateral jsonb_array_elements_text(traffic_subject_windows.reasons) as reason(value) on true
-      where window_start >= date_trunc('hour', now() - (${hours}::text || ' hours')::interval)
-      group by subject_key
-      having max(max_risk_score) >= 35
-        or sum(total_events) >= 80
-        or sum(search_events) >= 20
-        or sum(unique_path_hits) >= 40
-        or sum(unique_search_hits) >= 15
-      order by max(max_risk_score) desc, sum(total_events) desc
-      limit ${limit}
-    `);
+    try {
+      const result = await this.db.transaction(async (tx) => {
+        await tx.execute(sql`set local statement_timeout = '15s'`);
 
-    return this.rows(rows);
+        return tx.execute(sql`
+          with subject_stats as (
+            select
+              subject_key as "subjectKey",
+              max(client_ip) as "clientIp",
+              max(client_asn) as "clientAsn",
+              max(user_id) as "userId",
+              count(distinct user_id)::int as "userCount",
+              max(user_agent) as "lastUserAgent",
+              max(last_path) as "lastPath",
+              min(first_seen_at) as "firstSeenAt",
+              max(last_seen_at) as "lastSeenAt",
+              sum(total_events)::int as "events",
+              sum(search_events)::int as "searches",
+              sum(content_events)::int as "contentViews",
+              sum(lookup_events)::int as "lookupEvents",
+              sum(unique_path_hits)::int as "uniquePaths",
+              sum(unique_search_hits)::int as "uniqueSearches",
+              max(max_risk_score)::int as "maxRiskScore",
+              (sum(risk_score_sum)::float / nullif(sum(risk_samples), 0))::float as "avgRiskScore"
+            from traffic_subject_windows
+            where window_start >= date_trunc('hour', now() - (${hours}::text || ' hours')::interval)
+              and (
+                max_risk_score >= 35
+                or total_events >= 20
+                or search_events >= 5
+                or unique_path_hits >= 10
+                or unique_search_hits >= 5
+              )
+            group by subject_key
+            having max(max_risk_score) >= 35
+              or sum(total_events) >= 80
+              or sum(search_events) >= 20
+              or sum(unique_path_hits) >= 40
+              or sum(unique_search_hits) >= 15
+            order by max(max_risk_score) desc, sum(total_events) desc
+            limit ${limit}
+          ),
+          subject_reasons as (
+            select
+              t.subject_key as "subjectKey",
+              to_jsonb(array_remove(array_agg(distinct reason.value), null)) as reasons
+            from traffic_subject_windows t
+            inner join subject_stats s on s."subjectKey" = t.subject_key
+            left join lateral jsonb_array_elements_text(t.reasons) as reason(value) on true
+            where t.window_start >= date_trunc('hour', now() - (${hours}::text || ' hours')::interval)
+            group by t.subject_key
+          )
+          select
+            s."subjectKey",
+            s."clientIp",
+            s."clientAsn",
+            s."userId",
+            s."userCount",
+            s."lastUserAgent",
+            s."lastPath",
+            s."firstSeenAt",
+            s."lastSeenAt",
+            s."events",
+            s."searches",
+            s."contentViews",
+            s."uniquePaths",
+            s."uniqueSearches",
+            s."maxRiskScore",
+            s."avgRiskScore",
+            coalesce(r.reasons, '[]'::jsonb) as reasons
+          from subject_stats s
+          left join subject_reasons r on r."subjectKey" = s."subjectKey"
+        `);
+      });
+
+      return this.rows(result);
+    } catch (error) {
+      const code = (error as { code?: string; cause?: { code?: string } })?.code
+        || (error as { cause?: { code?: string } })?.cause?.code;
+
+      if (code === '42P01' || code === '42703') {
+        console.warn(
+          'traffic_subject_windows table is missing or outdated; run the 0013 traffic rollups migration.',
+        );
+        return [];
+      }
+
+      console.error('Failed to load suspicious traffic subjects:', error);
+      throw new InternalServerErrorException(
+        'No se pudo cargar sujetos sospechosos. La consulta tardó demasiado o la tabla de tráfico no está disponible.',
+      );
+    }
   }
 
   async getBlockedSubjects(filters: { status?: string; limit?: number; offset?: number; q?: string }) {

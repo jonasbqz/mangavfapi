@@ -73,6 +73,27 @@ export class ChapterController {
     ).slice(0, MAX_LOOKUP_BATCH_IDS);
   }
 
+  private async assertChapterDownloadAccess(
+    comic: Parameters<RouteProtectionService['assertLegacyAccess']>[0],
+    headers: FastifyRequest['headers'],
+    jwtToken?: string | null,
+  ): Promise<void> {
+    if (this.routeProtectionService.hasInternalAccess(headers)) {
+      return;
+    }
+
+    if (jwtToken) {
+      try {
+        await this.jwtDownloadService.verifyToken(jwtToken);
+        return;
+      } catch {
+        // Fall back to legacy protected-route rules below.
+      }
+    }
+
+    await this.routeProtectionService.assertLegacyAccess(comic, headers);
+  }
+
   private async buildChapterResponse(navigation: Awaited<ReturnType<ChapterService['getNavigation']>>) {
     const chapter = navigation.current;
     const comic = chapter.comicScan?.comic;
@@ -364,14 +385,21 @@ export class ChapterController {
 
   @Get(':id/pages')
   @ApiOperation({ summary: 'Get chapter pages' })
+  @ApiQuery({
+    name: 'jwtToken',
+    required: false,
+    description: 'Download JWT issued by the reader; allows server-side PDF fetch on protected routes',
+  })
   async getPages(
     @Param('id', ParseIntPipe) id: number,
     @Req() request: FastifyRequest,
+    @Query('jwtToken') jwtToken?: string,
   ) {
     const nav = await this.chapterService.getNavigation(id);
-    await this.routeProtectionService.assertLegacyAccess(
+    await this.assertChapterDownloadAccess(
       nav.current.comicScan?.comic,
       request.headers,
+      jwtToken,
     );
     const chapter = await this.chapterService.getPages(id);
     if (!chapter) {
@@ -420,9 +448,10 @@ export class ChapterController {
     @Query('jwtToken') jwtToken?: string,
   ) {
     const nav = await this.chapterService.getNavigation(id);
-    await this.routeProtectionService.assertLegacyAccess(
+    await this.assertChapterDownloadAccess(
       nav.current.comicScan?.comic,
       request.headers,
+      jwtToken,
     );
 
     // --- Validate count value ---
