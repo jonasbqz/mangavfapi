@@ -586,6 +586,32 @@ export class TrafficEventsService {
     }
   }
 
+  async unblockAllActiveBlockedSubjects(input: {
+    actorId?: string | null;
+    reason?: string | null;
+  }) {
+    try {
+      const result = await this.db.execute(sql`
+        update traffic_blocked_subjects
+        set
+          status = 'unblocked',
+          blocked_until = null,
+          unblocked_at = now(),
+          unblocked_by = ${input.actorId || null},
+          unblock_reason = ${input.reason || 'mass_unblock'}
+        where status = 'active'
+        returning subject_key as "subjectKey"
+      `);
+
+      return {
+        unblocked: this.rows(result).length,
+      };
+    } catch (error) {
+      this.handleTrafficStorageError(error, 'traffic_blocked_subjects table is missing; run the 0014 blocked subjects migration.');
+      return { unblocked: 0 };
+    }
+  }
+
   private async inspectCounters(input: {
     clientIp: string | null;
     eventType: TrafficEventType;

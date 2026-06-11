@@ -58,6 +58,7 @@ function parseRedisUrl(url: string) {
               }
               return Math.min(times * 500, 5000);
             },
+            lazyConnect: true,
           }),
         };
       },

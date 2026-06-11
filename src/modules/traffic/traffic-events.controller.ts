@@ -63,6 +63,22 @@ export class TrafficEventsController {
     });
   }
 
+  @Post('blocked/unblock-all')
+  @ApiOperation({ summary: 'Unblock all currently active bot blocks' })
+  @ApiBody({
+    required: false,
+    schema: { type: 'object', properties: { reason: { type: 'string' } } },
+  })
+  async unblockAll(
+    @Headers('x-admin-actor-id') actorId?: string,
+    @Body() body?: { reason?: string },
+  ) {
+    return this.trafficEventsService.unblockAllActiveBlockedSubjects({
+      actorId,
+      reason: body?.reason,
+    });
+  }
+
   @Post('blocked/:subjectKey/unblock')
   @ApiOperation({ summary: 'Mark a blocked bot subject as manually unblocked' })
   @ApiParam({ name: 'subjectKey', type: String })
