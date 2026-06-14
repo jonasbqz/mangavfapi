@@ -8,6 +8,18 @@ import {
 } from '@nestjs/common';
 import { FastifyReply } from 'fastify';
 
+function formatErrorChain(error: unknown): string {
+  const parts: string[] = [];
+  let current: unknown = error;
+
+  while (current instanceof Error) {
+    parts.push(current.message);
+    current = current.cause;
+  }
+
+  return parts.length > 0 ? parts.join(' | cause: ') : String(error);
+}
+
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(HttpExceptionFilter.name);
@@ -33,12 +45,8 @@ export class HttpExceptionFilter implements ExceptionFilter {
       }
     } else if (exception instanceof Error) {
       message = exception.message;
-      const cause =
-        'cause' in exception && exception.cause instanceof Error
-          ? ` | cause: ${exception.cause.message}`
-          : '';
       this.logger.error(
-        `Unhandled error: ${exception.message}${cause}`,
+        `Unhandled error: ${formatErrorChain(exception)}`,
         exception.stack,
       );
     }

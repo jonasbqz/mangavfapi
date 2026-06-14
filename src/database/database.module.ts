@@ -2,6 +2,7 @@ import { Module, Global } from '@nestjs/common';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import * as schema from './schema';
 import { getSharedPool } from '@/lib/db-pool';
+import { ensureRuntimeSchema } from './ensure-runtime-schema';
 
 export const DATABASE_CONNECTION = 'DATABASE_CONNECTION';
 
@@ -11,7 +12,9 @@ export const DATABASE_CONNECTION = 'DATABASE_CONNECTION';
     {
       provide: DATABASE_CONNECTION,
       useFactory: async () => {
-        return drizzle(getSharedPool(), { schema });
+        const pool = getSharedPool();
+        await ensureRuntimeSchema(pool);
+        return drizzle(pool, { schema });
       },
     },
   ],

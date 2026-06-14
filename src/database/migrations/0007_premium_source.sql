@@ -1,2 +1,2 @@
-ALTER TABLE "profiles" ADD COLUMN "premium_source" text;
+ALTER TABLE "profiles" ADD COLUMN IF NOT EXISTS "premium_source" text;
 

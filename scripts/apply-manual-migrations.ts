@@ -49,24 +49,39 @@ function discoverLooseSqlFiles(): string[] {
     .sort();
 }
 
+function isBenignMigrationError(error: unknown): boolean {
+  const pgError = error as { code?: string };
+  return (
+    pgError.code === '42701' || // duplicate_column
+    pgError.code === '42P07' || // duplicate_table
+    pgError.code === '42710' || // duplicate_object
+    pgError.code === '23505'    // unique_violation (indexes)
+  );
+}
+
 async function applyMigration(pool: Pool, filename: string): Promise<void> {
   const filePath = join(MIGRATIONS_DIR, filename);
   const sql = readFileSync(filePath, 'utf8');
 
   console.log(`[migrate] applying ${filename}`);
-  await pool.query('BEGIN');
   try {
     await pool.query(sql);
-    await pool.query(
-      'INSERT INTO manual_migrations (filename) VALUES ($1)',
-      [filename],
-    );
-    await pool.query('COMMIT');
-    console.log(`[migrate] applied ${filename}`);
   } catch (error) {
-    await pool.query('ROLLBACK');
-    throw error;
+    if (isBenignMigrationError(error)) {
+      console.warn(
+        `[migrate] ${filename} already applied in DB, marking as done`,
+      );
+    } else {
+      console.error(`[migrate] failed on ${filename}:`, error);
+      throw error;
+    }
   }
+
+  await pool.query(
+    'INSERT INTO manual_migrations (filename) VALUES ($1) ON CONFLICT DO NOTHING',
+    [filename],
+  );
+  console.log(`[migrate] applied ${filename}`);
 }
 
 async function main(): Promise<void> {
