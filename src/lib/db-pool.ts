@@ -2,6 +2,31 @@ import { Pool } from 'pg';
 
 let sharedPool: Pool | null = null;
 
+function readPositiveInt(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export function resolvePoolMax(): number {
+  if (process.env.DB_POOL_MAX) {
+    return readPositiveInt(process.env.DB_POOL_MAX, 25);
+  }
+
+  const replicaCount = readPositiveInt(process.env.APP_REPLICA_COUNT, 1);
+  const connectionBudget = readPositiveInt(process.env.DB_CONNECTION_BUDGET, 24);
+
+  return Math.max(5, Math.min(15, Math.floor(connectionBudget / replicaCount)));
+}
+
+export function resolvePoolMin(poolMax: number): number {
+  const configuredMin = readPositiveInt(process.env.DB_POOL_MIN, 0);
+  if (process.env.DB_POOL_MIN) {
+    return Math.min(configuredMin, poolMax);
+  }
+
+  return poolMax >= 10 ? 1 : 0;
+}
+
 export function isDatabaseConnectionError(error: unknown): boolean {
   const messages = [
     error instanceof Error ? error.message : String(error),
@@ -22,15 +47,29 @@ export function isDatabaseConnectionError(error: unknown): boolean {
 
 export function getSharedPool(): Pool {
   if (!sharedPool) {
+    const poolMax = resolvePoolMax();
+    const poolMin = resolvePoolMin(poolMax);
+    const replicaCount = readPositiveInt(process.env.APP_REPLICA_COUNT, 1);
+
     sharedPool = new Pool({
       connectionString: process.env.DATABASE_URL,
-      max: Number(process.env.DB_POOL_MAX || 25),
-      min: Number(process.env.DB_POOL_MIN || 2),
+      max: poolMax,
+      min: poolMin,
       idleTimeoutMillis: Number(process.env.DB_IDLE_TIMEOUT_MS || 30000),
       connectionTimeoutMillis: Number(
         process.env.DB_CONNECTION_TIMEOUT_MS || 15000,
       ),
     });
+
+    console.log(
+      `Database pool configured: max=${poolMax}, min=${poolMin}, replicas=${replicaCount}`,
+    );
+
+    if (!process.env.DB_POOL_MAX && replicaCount > 1) {
+      console.warn(
+        `DB pool auto-scaled for ${replicaCount} replicas. Set DB_POOL_MAX or DB_CONNECTION_BUDGET explicitly if needed.`,
+      );
+    }
 
     sharedPool.on('error', (error) => {
       console.error('Database pool idle client error:', error.message);
