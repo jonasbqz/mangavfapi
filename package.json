@@ -5,8 +5,8 @@
   "author": "MangaBiblioteca",
   "scripts": {
     "build": "nest build && bun scripts/build-engagement-script.ts",
-    "start": "nest start",
-    "start:dev": "nest start --watch",
+    "start": "nest build && bun scripts/build-engagement-script.ts && bun dist/src/main.js",
+    "start:dev": "bun scripts/build-engagement-script.ts && nest start --watch",
     "start:prod": "bun scripts/apply-manual-migrations.ts && bun dist/src/main.js",
     "db:generate": "bun drizzle-kit generate",
     "db:migrate": "bun drizzle-kit migrate",

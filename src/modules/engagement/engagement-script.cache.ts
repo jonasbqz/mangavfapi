@@ -258,21 +258,23 @@ const ENGAGEMENT_LINKS = [
   { url: 'https://omg10.com/4/10637676', type: 'omg' },
 ];
 
-const PREBUILT_SCRIPT_PATH = join(
-  __dirname,
-  '../../../engagement/pl.obfuscated.js',
-);
+const PREBUILT_SCRIPT_CANDIDATES = [
+  join(__dirname, '../../../engagement/pl.obfuscated.js'),
+  join(process.cwd(), 'dist/engagement/pl.obfuscated.js'),
+];
 
 let cachedObfuscatedScript: string | null = null;
 let warmInFlight: Promise<string> | null = null;
 
 function loadPrebuiltScript(): string | null {
-  try {
-    if (existsSync(PREBUILT_SCRIPT_PATH)) {
-      return readFileSync(PREBUILT_SCRIPT_PATH, 'utf8');
+  for (const candidate of PREBUILT_SCRIPT_CANDIDATES) {
+    try {
+      if (existsSync(candidate)) {
+        return readFileSync(candidate, 'utf8');
+      }
+    } catch {
+      // Try the next candidate path.
     }
-  } catch {
-    // Fall back to runtime obfuscation in dev.
   }
 
   return null;

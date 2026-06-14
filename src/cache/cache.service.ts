@@ -1,6 +1,8 @@
 import { Injectable, Inject, OnModuleInit } from "@nestjs/common";
 import { CACHE_MANAGER } from "@nestjs/cache-manager";
 import type { Cache } from "cache-manager";
+import type Redis from "ioredis";
+import { getRedisRaw } from "@/lib/redis-raw";
 
 // Cache TTL constants (in milliseconds)
 export const CACHE_TTL = {
@@ -56,23 +58,23 @@ export class CacheService implements OnModuleInit {
       return;
     }
 
-    const client = this.getRedisClient();
+    const client = getRedisRaw();
     if (!client) {
       console.error(
-        "[cache] REDIS_URL is set but Redis client is unavailable — operations may fall back to in-memory cache",
+        "[cache] REDIS_URL is set but Redis client could not be initialized",
       );
       return;
     }
 
     try {
-      const pingCount = await client.incr("cache:startup:ping");
-      if (pingCount === 1) {
-        await client.pexpire("cache:startup:ping", 60_000);
+      const pong = await client.ping();
+      if (pong !== "PONG") {
+        throw new Error(`unexpected ping response: ${pong}`);
       }
       console.log("[cache] Redis connection verified");
     } catch (error) {
       console.error(
-        "[cache] Redis ping failed — cache may fall back to in-memory storage:",
+        "[cache] Redis ping failed — counters and rate limits may degrade:",
         this.getErrorMessage(error),
       );
     }
@@ -84,32 +86,25 @@ export class CacheService implements OnModuleInit {
 
   /**
    * Returns the underlying Redis-backed store when REDIS_URL is configured.
-   * cache-manager v7 wraps stores in Keyv → KeyvAdapter → legacy store.
+   * cache-manager v7 wraps stores in Keyv, so direct introspection is unreliable.
    */
   getRedisBackedStore(): {
     keys?: (pattern?: string) => Promise<string[]>;
-    client?: {
-      incr: (key: string) => Promise<number>;
-      pexpire: (key: string, ttlMs: number) => Promise<number>;
-      ttl: (key: string) => Promise<number>;
-      expire: (key: string, seconds: number) => Promise<number>;
-      zincrby: (key: string, increment: number, member: string) => Promise<string>;
-      zrevrange: (key: string, start: number, stop: number) => Promise<string[]>;
-      sadd: (key: string, member: string) => Promise<number>;
-      scard: (key: string) => Promise<number>;
-    };
+    client?: Redis;
   } | null {
-    const keyvAdapter = this.cacheManager.stores?.[0]?.opts?.store as
-      | { _cache?: ReturnType<CacheService['getRedisBackedStore']> }
-      | undefined;
-    const legacyStore = (this.cacheManager as { store?: ReturnType<CacheService['getRedisBackedStore']> })
-      .store;
+    const client = getRedisRaw();
+    if (!client) {
+      return null;
+    }
 
-    return keyvAdapter?._cache ?? legacyStore ?? null;
+    return {
+      client,
+      keys: async (pattern = "*") => client.keys(pattern),
+    };
   }
 
   getRedisClient() {
-    return this.getRedisBackedStore()?.client ?? null;
+    return getRedisRaw();
   }
 
   private shouldLogError(): boolean {
