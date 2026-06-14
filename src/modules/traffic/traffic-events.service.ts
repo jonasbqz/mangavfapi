@@ -1,4 +1,4 @@
-import { Inject, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Interval } from '@nestjs/schedule';
 import type { FastifyRequest } from 'fastify';
@@ -523,6 +523,106 @@ export class TrafficEventsService {
     } catch (error) {
       this.throwTrafficQueryError(
         'No se pudo cargar sujetos sospechosos. Prueba un periodo más corto o ejecuta las migraciones 0013_traffic_rollups.sql y 0016_traffic_suspicious_query_idx.sql.',
+        error,
+        '0013_traffic_rollups.sql',
+      );
+    }
+  }
+
+  async lookupByClientIp(filters: { ip: string; hours?: number }) {
+    const ip = filters.ip.trim();
+    if (!ip || ip.length > 64) {
+      throw new BadRequestException('IP inválida');
+    }
+
+    const hours = Math.min(Math.max(filters.hours || 168, 1), 24 * 30);
+
+    try {
+      const result = await this.db.transaction(async (tx) => {
+        await tx.execute(sql`set local statement_timeout = '30s'`);
+
+        const [summaryResult, usersResult] = await Promise.all([
+          tx.execute(sql`
+            select
+              sum(total_events)::int as events,
+              sum(search_events)::int as searches,
+              count(distinct subject_key)::int as subjects,
+              max(max_risk_score)::int as "maxRiskScore",
+              min(first_seen_at) as "firstSeenAt",
+              max(last_seen_at) as "lastSeenAt",
+              max(client_asn) as "clientAsn",
+              max(user_agent) as "lastUserAgent"
+            from traffic_subject_windows
+            where client_ip = ${ip}
+              and window_start >= date_trunc('hour', now() - (${hours}::text || ' hours')::interval)
+          `),
+          tx.execute(sql`
+            with traffic_users as (
+              select
+                user_id as "userId",
+                sum(total_events)::int as "trafficEvents",
+                max(last_seen_at) as "lastTrafficAt",
+                max(max_risk_score)::int as "maxRiskScore"
+              from traffic_subject_windows
+              where client_ip = ${ip}
+                and window_start >= date_trunc('hour', now() - (${hours}::text || ' hours')::interval)
+                and user_id is not null
+              group by user_id
+
+              union all
+
+              select
+                user_id as "userId",
+                count(*)::int as "trafficEvents",
+                max(occurred_at) as "lastTrafficAt",
+                max(risk_score)::int as "maxRiskScore"
+              from traffic_events
+              where client_ip = ${ip}
+                and occurred_at >= now() - (${hours}::text || ' hours')::interval
+                and user_id is not null
+              group by user_id
+            ),
+            merged as (
+              select
+                "userId",
+                sum("trafficEvents")::int as "trafficEvents",
+                max("lastTrafficAt") as "lastTrafficAt",
+                max("maxRiskScore")::int as "maxRiskScore"
+              from traffic_users
+              group by "userId"
+            )
+            select
+              m."userId",
+              p.id as "profileId",
+              p.username,
+              p.visible_name as "visibleName",
+              u.email,
+              p.is_banned as "isBanned",
+              m."trafficEvents",
+              m."lastTrafficAt",
+              m."maxRiskScore"
+            from merged m
+            left join profiles p on p.user_id = m."userId"
+            left join "user" u on u.id = m."userId"
+            order by m."lastTrafficAt" desc nulls last, m."trafficEvents" desc
+          `),
+        ]);
+
+        return {
+          summary: this.rows(summaryResult)[0] ?? null,
+          users: this.rows(usersResult),
+        };
+      });
+
+      return {
+        ip,
+        hours,
+        trafficSummary: result.summary,
+        trafficUsers: result.users,
+      };
+    } catch (error) {
+      this.throwTrafficQueryError(
+        'No se pudo consultar la IP. Ejecuta las migraciones 0012_traffic_events.sql y 0013_traffic_rollups.sql en monline-api.',
         error,
         '0013_traffic_rollups.sql',
       );

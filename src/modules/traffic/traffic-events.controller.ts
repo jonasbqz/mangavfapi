@@ -46,6 +46,20 @@ export class TrafficEventsController {
     });
   }
 
+  @Get('ip-lookup')
+  @ApiOperation({ summary: 'Resolve users and traffic summary for a client IP' })
+  @ApiQuery({ name: 'ip', required: true, type: String })
+  @ApiQuery({ name: 'hours', required: false, type: Number })
+  async ipLookup(
+    @Query('ip') ip?: string,
+    @Query('hours') hours?: string,
+  ) {
+    return this.trafficEventsService.lookupByClientIp({
+      ip: ip || '',
+      hours: hours ? Number.parseInt(hours, 10) : undefined,
+    });
+  }
+
   @Get('blocked')
   @ApiOperation({ summary: 'Blocked bot subjects with manual unblock status' })
   @ApiQuery({ name: 'status', required: false, enum: ['active', 'unblocked', 'expired', 'all'] })
