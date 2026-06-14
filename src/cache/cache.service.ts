@@ -42,6 +42,7 @@ export const CACHE_KEYS = {
 export class CacheService {
   private lastErrorTime = 0;
   private readonly ERROR_COOLDOWN_MS = 30000; // Only log errors every 30 seconds
+  private readonly wrapInFlight = new Map<string, Promise<unknown>>();
 
   constructor(@Inject(CACHE_MANAGER) private cacheManager: Cache) {}
 
@@ -168,9 +169,28 @@ export class CacheService {
       return cached;
     }
 
-    const result = await fn();
-    await this.set(key, result, ttl);
-    return result;
+    const inFlight = this.wrapInFlight.get(key);
+    if (inFlight) {
+      return inFlight as Promise<T>;
+    }
+
+    const promise = (async () => {
+      try {
+        const cachedAfterWait = await this.get<T>(key);
+        if (cachedAfterWait !== undefined && cachedAfterWait !== null) {
+          return cachedAfterWait;
+        }
+
+        const result = await fn();
+        await this.set(key, result, ttl);
+        return result;
+      } finally {
+        this.wrapInFlight.delete(key);
+      }
+    })();
+
+    this.wrapInFlight.set(key, promise);
+    return promise;
   }
 
   /**

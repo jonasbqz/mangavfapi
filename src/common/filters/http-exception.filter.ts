@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { FastifyReply } from 'fastify';
+import { isDatabaseConnectionError } from '@/lib/db-pool';
 
 function formatErrorChain(error: unknown): string {
   const parts: string[] = [];
@@ -44,11 +45,18 @@ export class HttpExceptionFilter implements ExceptionFilter {
         error = resObj.error || exception.name;
       }
     } else if (exception instanceof Error) {
-      message = exception.message;
-      this.logger.error(
-        `Unhandled error: ${formatErrorChain(exception)}`,
-        exception.stack,
-      );
+      if (isDatabaseConnectionError(exception)) {
+        status = HttpStatus.SERVICE_UNAVAILABLE;
+        message = 'La base de datos está saturada. Reintenta en unos segundos.';
+        error = 'Service Unavailable';
+        this.logger.warn(`Database connection saturation: ${formatErrorChain(exception)}`);
+      } else {
+        message = exception.message;
+        this.logger.error(
+          `Unhandled error: ${formatErrorChain(exception)}`,
+          exception.stack,
+        );
+      }
     }
 
     response.status(status).send({

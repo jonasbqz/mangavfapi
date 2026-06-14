@@ -15,7 +15,7 @@ export function resolvePoolMax(): number {
   const replicaCount = readPositiveInt(process.env.APP_REPLICA_COUNT, 1);
   const connectionBudget = readPositiveInt(process.env.DB_CONNECTION_BUDGET, 24);
 
-  return Math.max(5, Math.min(15, Math.floor(connectionBudget / replicaCount)));
+  return Math.max(4, Math.min(10, Math.floor(connectionBudget / replicaCount)));
 }
 
 export function resolvePoolMin(poolMax: number): number {

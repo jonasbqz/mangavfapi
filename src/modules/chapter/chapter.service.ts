@@ -76,27 +76,37 @@ export class ChapterService {
     return this.cacheService.wrap(
       cacheKey,
       async () => {
-        const chapter = await this.findById(chapterId);
-
-        const prevChapterPromise = this.db.query.chapters.findFirst({
-          where: and(
-            eq(chapters.comicScanId, chapter.comicScanId),
-            lt(chapters.chapterNumber, chapter.chapterNumber),
-          ),
-          orderBy: [desc(chapters.chapterNumber)],
+        const chapter = await this.db.query.chapters.findFirst({
+          where: eq(chapters.id, chapterId),
+          with: {
+            comicScan: {
+              with: {
+                comic: true,
+                scanGroup: true,
+              },
+            },
+          },
         });
 
-        const nextChapterPromise = this.db.query.chapters.findFirst({
-          where: and(
-            eq(chapters.comicScanId, chapter.comicScanId),
-            gt(chapters.chapterNumber, chapter.chapterNumber),
-          ),
-          orderBy: [chapters.chapterNumber],
-        });
+        if (!chapter) {
+          throw new NotFoundException('Chapter not found');
+        }
 
         const [prevChapter, nextChapter] = await Promise.all([
-          prevChapterPromise,
-          nextChapterPromise,
+          this.db.query.chapters.findFirst({
+            where: and(
+              eq(chapters.comicScanId, chapter.comicScanId),
+              lt(chapters.chapterNumber, chapter.chapterNumber),
+            ),
+            orderBy: [desc(chapters.chapterNumber)],
+          }),
+          this.db.query.chapters.findFirst({
+            where: and(
+              eq(chapters.comicScanId, chapter.comicScanId),
+              gt(chapters.chapterNumber, chapter.chapterNumber),
+            ),
+            orderBy: [chapters.chapterNumber],
+          }),
         ]);
 
         return {

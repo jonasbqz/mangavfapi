@@ -23,6 +23,7 @@ function createMockDb() {
     },
     insert: mock(() => ({
       values: mock(function () { return this; }),
+      onConflictDoUpdate: mock(function () { return this; }),
       returning: mock(async () => [{}]),
     })),
     update: mock(() => ({
@@ -72,7 +73,6 @@ describe('ReadingHistoryService', () => {
 
   describe('record', () => {
     it('creates a new entry when no existing record', async () => {
-      db.query.readingHistory.findFirst.mockResolvedValue(null);
       const newEntry = {
         id: 'entry-new',
         profileId,
@@ -83,6 +83,7 @@ describe('ReadingHistoryService', () => {
       };
       db.insert.mockReturnValue({
         values: mock(function () { return this; }),
+        onConflictDoUpdate: mock(function () { return this; }),
         returning: mock(async () => [newEntry]),
       });
 
@@ -98,17 +99,16 @@ describe('ReadingHistoryService', () => {
       expect(db.update).not.toHaveBeenCalled();
     });
 
-    it('updates an existing entry', async () => {
-      db.query.readingHistory.findFirst.mockResolvedValue(existingEntry);
+    it('upserts an existing entry', async () => {
       const updatedEntry = {
         ...existingEntry,
         progressPercentage: 75,
         readAt: new Date(),
         updatedAt: new Date(),
       };
-      db.update.mockReturnValue({
-        set: mock(function () { return this; }),
-        where: mock(function () { return this; }),
+      db.insert.mockReturnValue({
+        values: mock(function () { return this; }),
+        onConflictDoUpdate: mock(function () { return this; }),
         returning: mock(async () => [updatedEntry]),
       });
 
@@ -119,28 +119,11 @@ describe('ReadingHistoryService', () => {
       });
 
       expect(result.progressPercentage).toBe(75);
-      expect(db.update).toHaveBeenCalledTimes(1);
-      expect(db.insert).not.toHaveBeenCalled();
-    });
-
-    it('preserves existing progressPercentage when not provided', async () => {
-      db.query.readingHistory.findFirst.mockResolvedValue(existingEntry);
-      db.update.mockReturnValue({
-        set: mock(function () { return this; }),
-        where: mock(function () { return this; }),
-        returning: mock(async () => [{ ...existingEntry, progressPercentage: 50 }]),
-      });
-
-      const result = await service.record(profileId, {
-        comicId: 42,
-        chapterId: 10,
-      });
-
-      expect(result.progressPercentage).toBe(50);
+      expect(db.insert).toHaveBeenCalledTimes(1);
+      expect(db.update).not.toHaveBeenCalled();
     });
 
     it('defaults progressPercentage to 0 when creating without it', async () => {
-      db.query.readingHistory.findFirst.mockResolvedValue(null);
       const newEntry = {
         id: 'entry-new',
         profileId,
@@ -150,6 +133,7 @@ describe('ReadingHistoryService', () => {
       };
       db.insert.mockReturnValue({
         values: mock(function () { return this; }),
+        onConflictDoUpdate: mock(function () { return this; }),
         returning: mock(async () => [newEntry]),
       });
 

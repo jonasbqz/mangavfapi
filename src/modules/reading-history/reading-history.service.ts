@@ -14,34 +14,35 @@ export class ReadingHistoryService {
   ) {}
 
   async record(profileId: string, dto: RecordReadingDto) {
-    const existing = await this.db.query.readingHistory.findFirst({
-      where: and(
-        eq(readingHistory.profileId, profileId),
-        eq(readingHistory.comicId, dto.comicId),
-        eq(readingHistory.chapterId, dto.chapterId),
-      ),
-    });
+    const progressPercentage = dto.progressPercentage ?? 0;
+    const now = new Date();
 
-    if (existing) {
-      const [updated] = await this.db
-        .update(readingHistory)
-        .set({
-          progressPercentage: dto.progressPercentage ?? existing.progressPercentage,
-          readAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(readingHistory.id, existing.id))
-        .returning();
-      return updated;
-    }
-
-    const [entry] = await this.db.insert(readingHistory).values({
-      profileId,
-      comicId: dto.comicId,
-      chapterId: dto.chapterId,
-      progressPercentage: dto.progressPercentage || 0,
-      readAt: new Date(),
-    }).returning();
+    const [entry] = await this.db
+      .insert(readingHistory)
+      .values({
+        profileId,
+        comicId: dto.comicId,
+        chapterId: dto.chapterId,
+        progressPercentage,
+        readAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [
+          readingHistory.profileId,
+          readingHistory.comicId,
+          readingHistory.chapterId,
+        ],
+        set: {
+          progressPercentage: sql`CASE
+            WHEN ${readingHistory.progressPercentage} IS NULL THEN excluded.progress_percentage
+            WHEN excluded.progress_percentage > ${readingHistory.progressPercentage} THEN excluded.progress_percentage
+            ELSE ${readingHistory.progressPercentage}
+          END`,
+          readAt: now,
+          updatedAt: now,
+        },
+      })
+      .returning();
 
     return entry;
   }
