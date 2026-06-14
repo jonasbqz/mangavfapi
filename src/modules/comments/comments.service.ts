@@ -35,6 +35,9 @@ import { RouteProtectionService } from '@/modules/route-protection/route-protect
 
 type CommentSortMode = NonNullable<GetCommentsQueryDto['sort']>;
 
+const MAX_COMMENT_PAGE_LIMIT = 50;
+const INLINE_REPLY_PREVIEW_LIMIT = 2;
+
 const publicProfileColumns = {
   id: true,
   userId: true,
@@ -336,7 +339,7 @@ export class CommentsService {
     query: GetCommentsQueryDto,
     viewerProfileId?: string | null,
   ) {
-    const limit = Math.max(1, Number(query.limit || 20));
+    const limit = Math.min(Math.max(1, Number(query.limit || 20)), MAX_COMMENT_PAGE_LIMIT);
     const offset = Math.max(0, Number(query.offset || 0));
     const sort = (query.sort || 'best') as CommentSortMode;
 
@@ -362,7 +365,7 @@ export class CommentsService {
           },
           replies: {
             orderBy: [desc(comments.createdAt)],
-            limit: 5,
+            limit: INLINE_REPLY_PREVIEW_LIMIT,
             with: {
               profile: {
                 columns: publicProfileColumns,
@@ -404,7 +407,7 @@ export class CommentsService {
     query: GetCommentsQueryDto,
     viewerProfileId?: string | null,
   ) {
-    const limit = Math.max(1, Number(query.limit || 20));
+    const limit = Math.min(Math.max(1, Number(query.limit || 20)), MAX_COMMENT_PAGE_LIMIT);
     const offset = Math.max(0, Number(query.offset || 0));
     const sort = (query.sort || 'best') as CommentSortMode;
 
@@ -426,7 +429,7 @@ export class CommentsService {
           },
           replies: {
             orderBy: [desc(comments.createdAt)],
-            limit: 5,
+            limit: INLINE_REPLY_PREVIEW_LIMIT,
             with: {
               profile: {
                 columns: publicProfileColumns,
@@ -506,11 +509,14 @@ export class CommentsService {
   }
 
   async findByUser(profileId: string, limit = 50, offset = 0) {
+    const safeLimit = Math.min(Math.max(1, Number(limit || 50)), MAX_COMMENT_PAGE_LIMIT);
+    const safeOffset = Math.max(0, Number(offset || 0));
+
     return this.db.query.comments.findMany({
       where: eq(comments.profileId, profileId),
       orderBy: [desc(comments.createdAt)],
-      limit,
-      offset,
+      limit: safeLimit,
+      offset: safeOffset,
       with: {
         comic: {
           columns: {
@@ -646,11 +652,13 @@ export class CommentsService {
       offset?: number;
     } = {},
   ) {
-    const limit = Math.max(1, Math.min(options.limit ?? 20, 50));
+    const limit = Math.max(1, Math.min(options.limit ?? 20, MAX_COMMENT_PAGE_LIMIT));
     const offset = Math.max(0, options.offset ?? 0);
     const view = options.view === 'replies' ? 'replies' : 'mine';
 
-    const summary = await this.getUserActivitySummary(profileId);
+    const summary = offset === 0
+      ? await this.getUserActivitySummary(profileId)
+      : { myCommentsCount: 0, repliesToMeCount: 0 };
 
     if (view === 'replies') {
       return this.findRepliesToUser(profileId, limit, offset, summary);

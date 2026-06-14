@@ -36,7 +36,9 @@ export class PlaylistsService {
     return playlist;
   }
 
-  async findById(id: string) {
+  async findById(id: string, itemsLimit = 200) {
+    const safeItemsLimit = Math.min(Math.max(itemsLimit, 1), 200);
+
     return this.db.query.playlists.findFirst({
       where: eq(playlists.id, id),
       with: {
@@ -49,6 +51,7 @@ export class PlaylistsService {
           },
         },
         items: {
+          limit: safeItemsLimit,
           orderBy: [asc(playlistItems.order)],
           with: {
             comic: {
@@ -94,11 +97,14 @@ export class PlaylistsService {
   }
 
   async findPublic(limit = 20, offset = 0) {
+    const safeLimit = Math.min(Math.max(limit, 1), 50);
+    const safeOffset = Math.max(offset, 0);
+
     return this.db.query.playlists.findMany({
       where: eq(playlists.isPublic, true),
       orderBy: [desc(playlists.updatedAt)],
-      limit,
-      offset,
+      limit: safeLimit,
+      offset: safeOffset,
       with: {
         profile: {
           columns: {

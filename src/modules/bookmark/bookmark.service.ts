@@ -4,7 +4,11 @@ import { DATABASE_CONNECTION } from '@/database/database.module';
 import { bookmarks } from '@/database/schema';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '@/database/schema';
+import { BOOKMARK_COMIC_RELATIONS } from '@/lib/list-relations';
 import { CreateBookmarkDto, UpdateBookmarkDto } from './bookmark.dto';
+
+const DEFAULT_BOOKMARK_LIMIT = 100;
+const MAX_BOOKMARK_LIMIT = 100;
 
 @Injectable()
 export class BookmarkService {
@@ -12,6 +16,16 @@ export class BookmarkService {
     @Inject(DATABASE_CONNECTION)
     private db: NodePgDatabase<typeof schema>,
   ) {}
+
+  private resolveLimit(limit?: number) {
+    return Number.isFinite(limit)
+      ? Math.min(Math.max(limit as number, 1), MAX_BOOKMARK_LIMIT)
+      : DEFAULT_BOOKMARK_LIMIT;
+  }
+
+  private resolveOffset(offset?: number) {
+    return Number.isFinite(offset) ? Math.max(offset as number, 0) : 0;
+  }
 
   async upsert(profileId: string, dto: CreateBookmarkDto) {
     const existing = await this.db.query.bookmarks.findFirst({
@@ -44,39 +58,39 @@ export class BookmarkService {
     return bookmark;
   }
 
-  async findAll(profileId: string) {
+  async findAll(profileId: string, limit?: number, offset?: number) {
     return this.db.query.bookmarks.findMany({
       where: eq(bookmarks.profileId, profileId),
       orderBy: [desc(bookmarks.updatedAt)],
-      with: {
-        comic: true,
-      },
+      limit: this.resolveLimit(limit),
+      offset: this.resolveOffset(offset),
+      with: BOOKMARK_COMIC_RELATIONS,
     });
   }
 
-  async findByStatus(profileId: string, status: string) {
+  async findByStatus(profileId: string, status: string, limit?: number, offset?: number) {
     return this.db.query.bookmarks.findMany({
       where: and(
         eq(bookmarks.profileId, profileId),
         eq(bookmarks.status, status as any),
       ),
       orderBy: [desc(bookmarks.updatedAt)],
-      with: {
-        comic: true,
-      },
+      limit: this.resolveLimit(limit),
+      offset: this.resolveOffset(offset),
+      with: BOOKMARK_COMIC_RELATIONS,
     });
   }
 
-  async findFavorites(profileId: string) {
+  async findFavorites(profileId: string, limit?: number, offset?: number) {
     return this.db.query.bookmarks.findMany({
       where: and(
         eq(bookmarks.profileId, profileId),
         eq(bookmarks.isFavorite, true),
       ),
       orderBy: [desc(bookmarks.updatedAt)],
-      with: {
-        comic: true,
-      },
+      limit: this.resolveLimit(limit),
+      offset: this.resolveOffset(offset),
+      with: BOOKMARK_COMIC_RELATIONS,
     });
   }
 
@@ -86,9 +100,7 @@ export class BookmarkService {
         eq(bookmarks.profileId, profileId),
         eq(bookmarks.comicId, comicId),
       ),
-      with: {
-        comic: true,
-      },
+      with: BOOKMARK_COMIC_RELATIONS,
     });
   }
 

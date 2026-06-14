@@ -13,6 +13,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags, ApiQuery } from '@nestjs/swagger'
 import { AuthGuard } from '@/modules/auth/auth.guard';
 import { ProfileGuard } from '@/modules/auth/profile.guard';
 import { CurrentUser, UserSession } from '@/modules/auth/current-user.decorator';
+import { enrichEntriesWithPaths } from '@/lib/enrich-paths';
 import { ReadingHistoryService } from './reading-history.service';
 import { RecordReadingDto } from './reading-history.dto';
 import { RouteProtectionService } from '@/modules/route-protection/route-protection.service';
@@ -28,30 +29,12 @@ export class ReadingHistoryController {
   ) {}
 
   private async enrichEntry(entry: any): Promise<any> {
-    if (!entry?.comic) {
+    if (!entry) {
       return entry;
     }
 
-    const comicPath = await this.routeProtectionService.getComicPath(entry.comic);
-    const chapterPath = entry.chapter
-      ? await this.routeProtectionService.getChapterPath(entry.comic, entry.chapter, {
-          comicPath,
-        })
-      : undefined;
-
-    return {
-      ...entry,
-      comic: {
-        ...entry.comic,
-        comicPath,
-      },
-      chapter: entry.chapter
-        ? {
-            ...entry.chapter,
-            chapterPath,
-          }
-        : entry.chapter,
-    };
+    const [enriched] = await enrichEntriesWithPaths([entry], this.routeProtectionService);
+    return enriched;
   }
 
   @Post()
@@ -78,7 +61,7 @@ export class ReadingHistoryController {
       limit ? parseInt(limit, 10) : 50,
       offset ? parseInt(offset, 10) : 0,
     );
-    return Promise.all(entries.map((entry) => this.enrichEntry(entry)));
+    return enrichEntriesWithPaths(entries, this.routeProtectionService);
   }
 
   @Get('recent')
@@ -95,7 +78,7 @@ export class ReadingHistoryController {
       limit ? parseInt(limit, 10) : 10,
       offset ? parseInt(offset, 10) : 0,
     );
-    return Promise.all(entries.map((entry) => this.enrichEntry(entry)));
+    return enrichEntriesWithPaths(entries, this.routeProtectionService);
   }
 
   @Get('comics')
@@ -119,9 +102,7 @@ export class ReadingHistoryController {
     const items = await Promise.all(
       result.items.map(async (item) => ({
         ...item,
-        entries: await Promise.all(
-          item.entries.map((entry) => this.enrichEntry(entry)),
-        ),
+        entries: await enrichEntriesWithPaths(item.entries, this.routeProtectionService),
       })),
     );
 
@@ -133,12 +114,30 @@ export class ReadingHistoryController {
 
   @Get('comic/:comicId')
   @ApiOperation({ summary: 'Get reading history for a comic' })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'offset', required: false, type: Number })
   async findByComic(
     @CurrentUser() user: UserSession,
     @Param('comicId', ParseIntPipe) comicId: number,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
   ) {
-    const entries = await this.readingHistoryService.findByComic(user.profileId!, comicId);
-    return Promise.all(entries.map((entry) => this.enrichEntry(entry)));
+    const entries = await this.readingHistoryService.findByComic(
+      user.profileId!,
+      comicId,
+      limit ? parseInt(limit, 10) : 20,
+      offset ? parseInt(offset, 10) : 0,
+    );
+    return enrichEntriesWithPaths(entries, this.routeProtectionService);
+  }
+
+  @Delete('comic/:comicId')
+  @ApiOperation({ summary: 'Delete all reading history entries for a comic' })
+  async deleteByComic(
+    @CurrentUser() user: UserSession,
+    @Param('comicId', ParseIntPipe) comicId: number,
+  ) {
+    return this.readingHistoryService.deleteByComic(user.profileId!, comicId);
   }
 
   @Get('comic/:comicId/last')

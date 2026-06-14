@@ -1,9 +1,11 @@
 import { Injectable, Inject, NotFoundException } from '@nestjs/common';
-import { eq, and, desc, sql, inArray } from 'drizzle-orm';
+import { eq, and, desc, sql } from 'drizzle-orm';
 import { DATABASE_CONNECTION } from '@/database/database.module';
 import { readingHistory } from '@/database/schema';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '@/database/schema';
+import { mapWithConcurrency } from '@/lib/async';
+import { READING_HISTORY_RELATIONS } from '@/lib/list-relations';
 import { RecordReadingDto } from './reading-history.dto';
 
 @Injectable()
@@ -56,10 +58,7 @@ export class ReadingHistoryService {
       orderBy: [desc(readingHistory.readAt)],
       limit: safeLimit,
       offset: safeOffset,
-      with: {
-        comic: true,
-        chapter: true,
-      },
+      with: READING_HISTORY_RELATIONS,
     });
   }
 
@@ -72,10 +71,7 @@ export class ReadingHistoryService {
       orderBy: [desc(readingHistory.readAt)],
       limit: safeLimit,
       offset: safeOffset,
-      with: {
-        comic: true,
-        chapter: true,
-      },
+      with: READING_HISTORY_RELATIONS,
     });
   }
 
@@ -113,26 +109,28 @@ export class ReadingHistoryService {
     }> = [];
 
     if (comicIds.length > 0) {
-      allEntries = await this.db.query.readingHistory.findMany({
-        where: and(
-          eq(readingHistory.profileId, profileId),
-          inArray(readingHistory.comicId, comicIds),
-        ),
-        orderBy: [desc(readingHistory.readAt)],
-        with: {
-          comic: true,
-          chapter: true,
-        },
-      });
+      const perComicEntries = await mapWithConcurrency(
+        comicIds,
+        4,
+        (comicId) =>
+          this.db.query.readingHistory.findMany({
+            where: and(
+              eq(readingHistory.profileId, profileId),
+              eq(readingHistory.comicId, comicId),
+            ),
+            orderBy: [desc(readingHistory.readAt)],
+            limit: safeChaptersLimit,
+            with: READING_HISTORY_RELATIONS,
+          }),
+      );
+
+      allEntries = perComicEntries.flat();
     }
 
-    // Group entries by comicId in memory, respecting chaptersLimit per comic
     const entriesByComic = new Map<number, typeof allEntries>();
     for (const entry of allEntries) {
       const list = entriesByComic.get(entry.comicId) || [];
-      if (list.length < safeChaptersLimit) {
-        list.push(entry);
-      }
+      list.push(entry);
       entriesByComic.set(entry.comicId, list);
     }
 
@@ -149,17 +147,19 @@ export class ReadingHistoryService {
     };
   }
 
-  async findByComic(profileId: string, comicId: number) {
+  async findByComic(profileId: string, comicId: number, limit = 20, offset = 0) {
+    const safeLimit = Number.isFinite(limit) ? Math.min(Math.max(limit, 1), 50) : 20;
+    const safeOffset = Number.isFinite(offset) ? Math.max(offset, 0) : 0;
+
     return this.db.query.readingHistory.findMany({
       where: and(
         eq(readingHistory.profileId, profileId),
         eq(readingHistory.comicId, comicId),
       ),
       orderBy: [desc(readingHistory.readAt)],
-      with: {
-        comic: true,
-        chapter: true,
-      },
+      limit: safeLimit,
+      offset: safeOffset,
+      with: READING_HISTORY_RELATIONS,
     });
   }
 
@@ -170,11 +170,22 @@ export class ReadingHistoryService {
         eq(readingHistory.comicId, comicId),
       ),
       orderBy: [desc(readingHistory.readAt)],
-      with: {
-        comic: true,
-        chapter: true,
-      },
+      with: READING_HISTORY_RELATIONS,
     });
+  }
+
+  async deleteByComic(profileId: string, comicId: number) {
+    const result = await this.db
+      .delete(readingHistory)
+      .where(
+        and(
+          eq(readingHistory.profileId, profileId),
+          eq(readingHistory.comicId, comicId),
+        ),
+      )
+      .returning({ id: readingHistory.id });
+
+    return { deletedCount: result.length };
   }
 
   async delete(profileId: string, id: string) {

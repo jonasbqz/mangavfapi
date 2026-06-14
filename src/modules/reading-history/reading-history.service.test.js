@@ -199,13 +199,16 @@ describe('ReadingHistoryService', () => {
       };
       db.select.mockReturnValue(selectChain);
 
-      // Mock the batch findMany for all entries
-      const allEntries = [
+      const comic42Entries = [
         { id: 'e1', profileId, comicId: 42, chapterId: 10, readAt: new Date('2025-01-20'), comic: comicRelation, chapter: chapterRelation },
         { id: 'e2', profileId, comicId: 42, chapterId: 11, readAt: new Date('2025-01-19'), comic: comicRelation, chapter: { ...chapterRelation, id: 11 } },
+      ];
+      const comic43Entries = [
         { id: 'e3', profileId, comicId: 43, chapterId: 20, readAt: new Date('2025-01-18'), comic: { ...comicRelation, id: 43 }, chapter: { ...chapterRelation, id: 20 } },
       ];
-      db.query.readingHistory.findMany.mockResolvedValue(allEntries);
+      db.query.readingHistory.findMany
+        .mockResolvedValueOnce(comic42Entries)
+        .mockResolvedValueOnce(comic43Entries);
 
       const result = await service.findGroupedByComic(profileId, 2, 0, 4);
 
@@ -233,8 +236,7 @@ describe('ReadingHistoryService', () => {
       };
       db.select.mockReturnValue(selectChain);
 
-      // 5 entries for one comic, but chaptersLimit is 2
-      const allEntries = Array.from({ length: 5 }, (_, i) => ({
+      const limitedEntries = Array.from({ length: 2 }, (_, i) => ({
         id: `e${i}`,
         profileId,
         comicId: 42,
@@ -243,7 +245,7 @@ describe('ReadingHistoryService', () => {
         comic: comicRelation,
         chapter: { ...chapterRelation, id: 10 + i },
       }));
-      db.query.readingHistory.findMany.mockResolvedValue(allEntries);
+      db.query.readingHistory.findMany.mockResolvedValueOnce(limitedEntries);
 
       const result = await service.findGroupedByComic(profileId, 20, 0, 2);
 
