@@ -33,7 +33,14 @@ export class HttpExceptionFilter implements ExceptionFilter {
       }
     } else if (exception instanceof Error) {
       message = exception.message;
-      this.logger.error(`Unhandled error: ${exception.message}`, exception.stack);
+      const cause =
+        'cause' in exception && exception.cause instanceof Error
+          ? ` | cause: ${exception.cause.message}`
+          : '';
+      this.logger.error(
+        `Unhandled error: ${exception.message}${cause}`,
+        exception.stack,
+      );
     }
 
     response.status(status).send({

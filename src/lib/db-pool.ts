@@ -24,13 +24,12 @@ export function getSharedPool(): Pool {
   if (!sharedPool) {
     sharedPool = new Pool({
       connectionString: process.env.DATABASE_URL,
-      max: Number(process.env.DB_POOL_MAX || 30),
-      min: Number(process.env.DB_POOL_MIN || 2),
+      max: Number(process.env.DB_POOL_MAX || 20),
+      min: Number(process.env.DB_POOL_MIN || 0),
       idleTimeoutMillis: Number(process.env.DB_IDLE_TIMEOUT_MS || 30000),
       connectionTimeoutMillis: Number(
-        process.env.DB_CONNECTION_TIMEOUT_MS || 5000,
+        process.env.DB_CONNECTION_TIMEOUT_MS || 10000,
       ),
-      allowExitOnIdle: true,
     });
 
     sharedPool.on('error', (error) => {
