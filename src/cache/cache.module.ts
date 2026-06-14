@@ -1,7 +1,8 @@
 import { Global, Module } from '@nestjs/common';
 import { CacheModule } from '@nestjs/cache-manager';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { redisStore } from 'cache-manager-ioredis-yet';
+import { redisInsStore } from 'cache-manager-ioredis-yet';
+import { describeRedisTarget, initRedisClient } from '@/lib/redis-raw';
 import { CacheService } from './cache.service';
 
 @Global()
@@ -20,22 +21,22 @@ import { CacheService } from './cache.service';
           };
         }
 
-        console.log('Connecting to Redis...');
+        const client = initRedisClient(redisUrl);
+        if (!client) {
+          console.warn(
+            'REDIS_URL is set but Redis client could not be initialized, using in-memory cache',
+          );
+          return {
+            ttl: 60 * 1000,
+          };
+        }
+
+        console.log(`Connecting to Redis at ${describeRedisTarget(redisUrl)}...`);
 
         return {
-          store: await redisStore({
-            url: redisUrl,
-            ttl: 60,
-            maxRetriesPerRequest: 3,
-            enableOfflineQueue: true,
-            connectTimeout: 5000,
-            retryStrategy: (times: number) => {
-              if (times > 10) {
-                return 10000;
-              }
-              return Math.min(times * 500, 5000);
-            },
-          } as Parameters<typeof redisStore>[0]),
+          store: redisInsStore(client as never, {
+            ttl: 60, // default TTL in seconds
+          }),
         };
       },
     }),

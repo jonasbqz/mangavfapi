@@ -71,7 +71,9 @@ export class CacheService implements OnModuleInit {
       if (pong !== "PONG") {
         throw new Error(`unexpected ping response: ${pong}`);
       }
-      console.log("[cache] Redis connection verified");
+      console.log(
+        `[cache] Redis connection verified (${client.options.host}:${client.options.port})`,
+      );
     } catch (error) {
       console.error(
         "[cache] Redis ping failed — counters and rate limits may degrade:",

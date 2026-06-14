@@ -1,12 +1,32 @@
 import Redis from 'ioredis';
 
 let redisClient: Redis | null = null;
+let lastErrorLogAt = 0;
 
-export function getRedisRaw(): Redis | null {
-  const url = process.env.REDIS_URL;
+function attachRedisErrorHandler(client: Redis): void {
+  client.on('error', (error) => {
+    const now = Date.now();
+    if (now - lastErrorLogAt < 30_000) {
+      return;
+    }
 
-  if (!url) {
-    console.warn('[redis-raw] REDIS_URL no definida.');
+    lastErrorLogAt = now;
+    console.error('[redis] Connection error:', error.message);
+  });
+}
+
+export function describeRedisTarget(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.hostname}:${parsed.port || '6379'}`;
+  } catch {
+    return 'unknown';
+  }
+}
+
+export function initRedisClient(url: string): Redis | null {
+  const trimmed = url.trim();
+  if (!trimmed) {
     return null;
   }
 
@@ -15,19 +35,37 @@ export function getRedisRaw(): Redis | null {
   }
 
   try {
-    redisClient = new Redis(url, {
+    redisClient = new Redis(trimmed, {
       maxRetriesPerRequest: 3,
-      // Se elimina enableOfflineQueue: false para que ioredis encole los comandos 
-      // mientras termina de conectarse en los primeros milisegundos de arranque del server.
+      enableOfflineQueue: true,
+      connectTimeout: 5000,
+      retryStrategy: (times) => {
+        if (times > 10) {
+          return 10_000;
+        }
+        return Math.min(times * 500, 5000);
+      },
     });
-
-    redisClient.on('error', (err) => {
-      console.error('[redis-raw] Error de conexión:', err.message);
-    });
-
+    attachRedisErrorHandler(redisClient);
     return redisClient;
-  } catch (err) {
-    console.error('[redis-raw] No se pudo inicializar:', err);
+  } catch (error) {
+    console.error(
+      '[redis] Failed to initialize:',
+      error instanceof Error ? error.message : String(error),
+    );
     return null;
   }
+}
+
+export function getRedisRaw(): Redis | null {
+  if (redisClient) {
+    return redisClient;
+  }
+
+  const url = process.env.REDIS_URL?.trim();
+  if (!url) {
+    return null;
+  }
+
+  return initRedisClient(url);
 }
