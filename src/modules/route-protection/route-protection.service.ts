@@ -28,6 +28,10 @@ interface ProtectedChapterShape {
 
 @Injectable()
 export class RouteProtectionService {
+  private readonly persistedEntities = new Set<string>();
+  private readonly codePromises = new Map<string, Promise<string>>();
+  private readonly persistPromises = new Map<string, Promise<void>>();
+
   constructor(
     private readonly cacheService: CacheService,
     private readonly configService: ConfigService,
@@ -158,22 +162,41 @@ export class RouteProtectionService {
     entityType: RouteEntityType,
     entityId: number,
   ): Promise<string> {
+    const entityKey = this.getEntityKey(entityType, entityId);
+    const inFlight = this.codePromises.get(entityKey);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const promise = this.resolveOrCreateCode(entityType, entityId).finally(() => {
+      this.codePromises.delete(entityKey);
+    });
+    this.codePromises.set(entityKey, promise);
+    return promise;
+  }
+
+  private async resolveOrCreateCode(
+    entityType: RouteEntityType,
+    entityId: number,
+  ): Promise<string> {
     const cacheKey = this.getCacheKey(entityType, entityId);
 
     const cached = await this.cacheService.get<string>(cacheKey);
     if (this.isValidCode(cached)) {
-      await this.ensurePersistedCode(entityType, entityId, cached);
+      await this.ensurePersistedOnce(entityType, entityId, cached);
       return cached;
     }
 
     const persisted = await this.readPersistedCode(entityType, entityId);
     if (this.isValidCode(persisted)) {
+      this.markEntityPersisted(entityType, entityId);
       await this.cacheService.set(cacheKey, persisted, ROUTE_CODE_CACHE_TTL_MS);
       return persisted;
     }
 
     const code = this.generateCode();
     const stored = await this.insertPersistedCode(entityType, entityId, code);
+    this.markEntityPersisted(entityType, entityId);
     await this.cacheService.set(cacheKey, stored, ROUTE_CODE_CACHE_TTL_MS);
     return stored;
   }
@@ -201,10 +224,11 @@ export class RouteProtectionService {
       });
 
     await this.cacheService.set(cacheKey, code, ROUTE_CODE_CACHE_TTL_MS);
+    this.markEntityPersisted(entityType, entityId);
     return code;
   }
 
-  private async ensurePersistedCode(
+  private async ensurePersistedOnce(
     entityType: RouteEntityType,
     entityId: number,
     code: string,
@@ -213,7 +237,29 @@ export class RouteProtectionService {
       return;
     }
 
-    await this.insertPersistedCode(entityType, entityId, code);
+    const entityKey = this.getEntityKey(entityType, entityId);
+    if (this.persistedEntities.has(entityKey)) {
+      return;
+    }
+
+    const inFlight = this.persistPromises.get(entityKey);
+    if (inFlight) {
+      await inFlight;
+      return;
+    }
+
+    const promise = (async () => {
+      const existing = await this.readPersistedCode(entityType, entityId);
+      if (!this.isValidCode(existing)) {
+        await this.insertPersistedCode(entityType, entityId, code);
+      }
+      this.markEntityPersisted(entityType, entityId);
+    })().finally(() => {
+      this.persistPromises.delete(entityKey);
+    });
+
+    this.persistPromises.set(entityKey, promise);
+    await promise;
   }
 
   private async readPersistedCode(
@@ -272,6 +318,17 @@ export class RouteProtectionService {
 
   private getCacheKey(entityType: RouteEntityType, entityId: number): string {
     return `route:${entityType}:${entityId}`;
+  }
+
+  private getEntityKey(entityType: RouteEntityType, entityId: number): string {
+    return `${entityType}:${entityId}`;
+  }
+
+  private markEntityPersisted(
+    entityType: RouteEntityType,
+    entityId: number,
+  ): void {
+    this.persistedEntities.add(this.getEntityKey(entityType, entityId));
   }
 
   private getHeaderValue(headers: HeadersLike, name: string): string {

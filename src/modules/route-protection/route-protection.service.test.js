@@ -73,6 +73,8 @@ describe('RouteProtectionService', () => {
   });
 
   it('reuses cached chapter codes without regenerating them', async () => {
+    let executeCalls = 0;
+
     const service = new RouteProtectionService(
       {
         get: async () => '654321',
@@ -80,17 +82,28 @@ describe('RouteProtectionService', () => {
       },
       { get: () => undefined },
       {
+        select: () => ({
+          from: () => ({
+            where: () => ({
+              limit: async () => [{ code: '654321' }],
+            }),
+          }),
+        }),
         insert: () => ({
           values: () => ({
             onConflictDoNothing: async () => undefined,
           }),
         }),
-        execute: async () => [{ code: '654321' }],
+        execute: async () => {
+          executeCalls += 1;
+          return [{ code: '654321' }];
+        },
       },
     );
 
     const code = await service.getChapterCode(7);
 
     expect(code).toBe('654321');
+    expect(executeCalls).toBe(0);
   });
 });

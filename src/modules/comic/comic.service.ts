@@ -6,6 +6,7 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '@/database/schema';
 import { CacheService, CACHE_TTL, CACHE_KEYS } from '@/cache/cache.service';
 import { RouteProtectionService } from '@/modules/route-protection/route-protection.service';
+import { mapWithConcurrency } from '@/lib/async';
 
 // Adult genre slugs - used to automatically mark comics as NSFW
 // Note: ecchi and smut are NOT considered adult content
@@ -67,8 +68,13 @@ export class ComicService {
 
   private async buildRecentChapterSummaries<
     T extends { id: number; slug: string; protectedRouteEnabled?: boolean | null },
-  >(comic: T, recentChapters: Array<{ id: number; [key: string]: any }>) {
-    const comicPath = await this.routeProtectionService.getComicPath(comic);
+  >(
+    comic: T,
+    recentChapters: Array<{ id: number; [key: string]: any }>,
+    options?: { comicPath?: string },
+  ) {
+    const comicPath =
+      options?.comicPath ?? (await this.routeProtectionService.getComicPath(comic));
 
     return Promise.all(
       recentChapters.map(async (chapter) => ({
@@ -748,9 +754,11 @@ export class ComicService {
       chaptersByScan.get(scanId)!.push(chapter);
     }
 
-    // Step 4: Build results preserving order
-    const recentResults = await Promise.all(
-      sortedScans.map(async ({ comic_scan_id, last_chapter_at }) => {
+    // Step 4: Build results preserving order (limit DB pressure from route codes)
+    const recentResults = await mapWithConcurrency(
+      sortedScans,
+      4,
+      async ({ comic_scan_id, last_chapter_at }) => {
         const scan = scanDataMap.get(comic_scan_id);
         if (!scan?.comic) return null;
 
@@ -775,14 +783,18 @@ export class ComicService {
           scan_group_id: scan.scanGroup?.id || 0,
           scan_group_name: scan.scanGroup?.name || 'Unknown',
           last_chapter_at: last_chapter_at,
-          recent_chapters: await this.buildRecentChapterSummaries(scan.comic, chaps.map(ch => ({
-            id: ch.id,
-            chapter_number: String(ch.chapter_number),
-            title: ch.title || `Capítulo ${ch.chapter_number}`,
-            created_at: ch.created_at,
-          }))),
+          recent_chapters: await this.buildRecentChapterSummaries(
+            scan.comic,
+            chaps.map((ch) => ({
+              id: ch.id,
+              chapter_number: String(ch.chapter_number),
+              title: ch.title || `Capítulo ${ch.chapter_number}`,
+              created_at: ch.created_at,
+            })),
+            { comicPath },
+          ),
         };
-      }),
+      },
     );
 
     return recentResults.filter(Boolean);
