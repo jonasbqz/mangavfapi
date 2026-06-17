@@ -55,6 +55,7 @@ export function getSharedPool(): Pool {
       connectionString: process.env.DATABASE_URL,
       max: poolMax,
       min: poolMin,
+      keepAlive: true,
       idleTimeoutMillis: Number(process.env.DB_IDLE_TIMEOUT_MS || 30000),
       connectionTimeoutMillis: Number(
         process.env.DB_CONNECTION_TIMEOUT_MS || 15000,
