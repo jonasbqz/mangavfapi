@@ -18,7 +18,6 @@ function createRouteProtectionService() {
 function createChapterService({
   comicBySlug = null,
   chaptersBySlug = [],
-  chapterRandom = '3392781',
   dbQueryChaptersResult = null,
   comicScanIds = [1],
 } = {}) {
@@ -69,9 +68,6 @@ function createChapterService({
     createRouteProtectionService(),
   );
 
-  service['routeProtectionService'].validateChapterRandom = async () => true;
-  service['routeProtectionService'].getOrCreateChapterRandom = async () => chapterRandom;
-
   // Make getNavigation fast and stubbed
   service.getNavigation = async (chapterId) => ({
     current: {
@@ -88,7 +84,7 @@ function createChapterService({
 }
 
 describe('ChapterService.findPublicByRouteSegments', () => {
-  it('resolves a protected comic + chapter segment and returns the navigation', async () => {
+  it('resolves a protected comic + chapter slug and returns the navigation', async () => {
     const service = createChapterService({
       comicBySlug: {
         id: 10,
@@ -96,17 +92,33 @@ describe('ChapterService.findPublicByRouteSegments', () => {
         protectedRouteEnabled: true,
       },
       chaptersBySlug: [
-        { id: 55, slug: '5', comicScanId: 1 },
+        { id: 55, slug: '1185237596551512066', comicScanId: 1 },
       ],
-      chapterRandom: '3392781',
     });
 
     const result = await service.findPublicByRouteSegments(
       '133my-comic2125',
-      '90-5-3392781',
+      '1185237596551512066',
     );
 
     expect(result.comic.slug).toBe('133my-comic2125');
+    expect(result.navigation.current.id).toBe(55);
+  });
+
+  it('resolves an unprotected comic + chapter slug', async () => {
+    const service = createChapterService({
+      comicBySlug: {
+        id: 10,
+        slug: 'my-comic',
+        protectedRouteEnabled: false,
+      },
+      chaptersBySlug: [
+        { id: 55, slug: '5', comicScanId: 1 },
+      ],
+    });
+
+    const result = await service.findPublicByRouteSegments('my-comic', '5');
+    expect(result.comic.slug).toBe('my-comic');
     expect(result.navigation.current.id).toBe(55);
   });
 
@@ -118,14 +130,14 @@ describe('ChapterService.findPublicByRouteSegments', () => {
 
     let error;
     try {
-      await service.findPublicByRouteSegments('nonexistent', '90-5-3392781');
+      await service.findPublicByRouteSegments('nonexistent', '5');
     } catch (caught) {
       error = caught;
     }
     expect(error).toBeInstanceOf(NotFoundException);
   });
 
-  it('rejects protected chapter access when the random suffix is missing', async () => {
+  it('rejects with 503 when a protected comic has no matching chapter', async () => {
     const service = createChapterService({
       comicBySlug: {
         id: 10,
@@ -137,61 +149,14 @@ describe('ChapterService.findPublicByRouteSegments', () => {
 
     let error;
     try {
-      await service.findPublicByRouteSegments('133my-comic2125', '90-5');
+      await service.findPublicByRouteSegments('133my-comic2125', 'unknown-chapter');
     } catch (caught) {
       error = caught;
     }
     expect(error).toBeInstanceOf(ServiceUnavailableException);
   });
 
-  it('rejects protected chapter access when the random suffix does not match Redis', async () => {
-    const service = createChapterService({
-      comicBySlug: {
-        id: 10,
-        slug: '133my-comic2125',
-        protectedRouteEnabled: true,
-      },
-      chaptersBySlug: [{ id: 55, slug: '5', comicScanId: 1 }],
-    });
-    service['routeProtectionService'].validateChapterRandom = async () => false;
-
-    let error;
-    try {
-      await service.findPublicByRouteSegments('133my-comic2125', '90-5-9999999');
-    } catch (caught) {
-      error = caught;
-    }
-    expect(error).toBeInstanceOf(ServiceUnavailableException);
-  });
-
-  it('returns not found when the chapter segment cannot be parsed', async () => {
-    const service = createChapterService();
-
-    let error;
-    try {
-      await service.findPublicByRouteSegments('133my-comic2125', 'bad-segment');
-    } catch (caught) {
-      error = caught;
-    }
-    expect(error).toBeInstanceOf(NotFoundException);
-  });
-
-  it('accepts an unprotected comic + chapter segment (no random suffix)', async () => {
-    const service = createChapterService({
-      comicBySlug: {
-        id: 10,
-        slug: 'my-comic',
-        protectedRouteEnabled: false,
-      },
-      chaptersBySlug: [{ id: 55, slug: '5', comicScanId: 1 }],
-    });
-
-    const result = await service.findPublicByRouteSegments('my-comic', '90-5');
-    expect(result.comic.slug).toBe('my-comic');
-    expect(result.navigation.current.id).toBe(55);
-  });
-
-  it('rejects an unprotected comic + chapter segment WITH a random suffix', async () => {
+  it('rejects with 404 when an unprotected comic has no matching chapter', async () => {
     const service = createChapterService({
       comicBySlug: {
         id: 10,
@@ -203,7 +168,7 @@ describe('ChapterService.findPublicByRouteSegments', () => {
 
     let error;
     try {
-      await service.findPublicByRouteSegments('my-comic', '90-5-3392781');
+      await service.findPublicByRouteSegments('my-comic', 'unknown-chapter');
     } catch (caught) {
       error = caught;
     }

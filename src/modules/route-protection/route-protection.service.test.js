@@ -142,44 +142,16 @@ describe('RouteProtectionService', () => {
       {},
     );
 
-    it('extracts chapter slug and 7-digit random from 90-<slug>-<random>', () => {
-      const result = service.parseChapterSegment('90-5-3392781');
-      expect(result.chapterSlug).toBe('5');
-      expect(result.random).toBe('3392781');
-      expect(result.hasRandom).toBe(true);
+    it('returns the segment as the chapter slug (no 90- prefix, no random)', () => {
+      const result = service.parseChapterSegment('1185237596551512066');
+      expect(result.chapterSlug).toBe('1185237596551512066');
+      expect(result.random).toBe(null);
+      expect(result.hasRandom).toBe(false);
     });
 
-    it('extracts slugified title as chapter slug', () => {
-      const result = service.parseChapterSegment('90-the-battle-begins-3392781');
-      expect(result.chapterSlug).toBe('the-battle-begins');
-      expect(result.random).toBe('3392781');
-      expect(result.hasRandom).toBe(true);
-    });
-
-    it('handles decimal chapter numbers (5.5)', () => {
-      const result = service.parseChapterSegment('90-5.5-3392781');
-      expect(result.chapterSlug).toBe('5.5');
-      expect(result.random).toBe('3392781');
-      expect(result.hasRandom).toBe(true);
-    });
-
-    it('returns hasRandom false when the random suffix is missing (unprotected)', () => {
+    it('returns the segment as-is for legacy 90-<slug> URLs', () => {
       const result = service.parseChapterSegment('90-5');
-      expect(result.chapterSlug).toBe('5');
-      expect(result.random).toBe(null);
-      expect(result.hasRandom).toBe(false);
-    });
-
-    it('returns the original segment when the 90- prefix is missing', () => {
-      const result = service.parseChapterSegment('5-3392781');
-      expect(result.chapterSlug).toBe('5-3392781');
-      expect(result.hasRandom).toBe(false);
-    });
-
-    it('returns hasRandom false when the trailing token is not 7 digits', () => {
-      const result = service.parseChapterSegment('90-5-123');
-      expect(result.chapterSlug).toBe('5-123');
-      expect(result.random).toBe(null);
+      expect(result.chapterSlug).toBe('90-5');
       expect(result.hasRandom).toBe(false);
     });
   });
@@ -203,46 +175,6 @@ describe('RouteProtectionService', () => {
     it('returns false for null/undefined comic', () => {
       expect(service.isProtected(null)).toBe(false);
       expect(service.isProtected(undefined)).toBe(false);
-    });
-  });
-
-  describe('getOrCreateChapterRandom', () => {
-    it('returns the cached value when present', async () => {
-      const { service } = createService({
-        cacheGet: async (key) => (key === 'route:chapter:random:42' ? '1234567' : undefined),
-      });
-      const result = await service.getOrCreateChapterRandom(42);
-      expect(result).toBe('1234567');
-    });
-
-    it('generates a fresh 7-digit random and caches it with the 3-day TTL when missing', async () => {
-      const { service, cacheSetCalls } = createService({
-        cacheGet: async () => undefined,
-      });
-      const result = await service.getOrCreateChapterRandom(42);
-      expect(result).toMatch(/^\d{7}$/);
-      expect(cacheSetCalls).toHaveLength(1);
-      expect(cacheSetCalls[0].key).toBe('route:chapter:random:42');
-      expect(cacheSetCalls[0].value).toBe(result);
-      expect(cacheSetCalls[0].ttl).toBe(3 * 24 * 60 * 60 * 1000);
-    });
-  });
-
-  describe('validateChapterRandom', () => {
-    it('returns true when the cache value matches the provided random', async () => {
-      const { service } = createService({
-        cacheGet: async (key) => (key === 'route:chapter:random:42' ? '3392781' : undefined),
-      });
-      const result = await service.validateChapterRandom(42, '3392781');
-      expect(result).toBe(true);
-    });
-
-    it('returns false when the cache value differs from the provided random', async () => {
-      const { service } = createService({
-        cacheGet: async (key) => (key === 'route:chapter:random:42' ? '9999999' : undefined),
-      });
-      const result = await service.validateChapterRandom(42, '1111111');
-      expect(result).toBe(false);
     });
   });
 
@@ -294,6 +226,31 @@ describe('RouteProtectionService', () => {
         protectedRouteEnabled: true,
       });
       expect(path).toBe('/comics/133naruto2125');
+    });
+  });
+
+  describe('getChapterPath', () => {
+    const service = new RouteProtectionService(
+      { get: async () => undefined, set: async () => {}, del: async () => {} },
+      { get: () => undefined },
+      {},
+    );
+
+    it('returns /comics/<comic>/chapters/<slug> with no 90- prefix and no random suffix', async () => {
+      const path = await service.getChapterPath(
+        { id: 1, slug: 'naruto', protectedRouteEnabled: false },
+        { id: 55, slug: '1185237596551512066' },
+      );
+      expect(path).toBe('/comics/naruto/chapters/1185237596551512066');
+    });
+
+    it('uses the provided comicPath when supplied', async () => {
+      const path = await service.getChapterPath(
+        { id: 1, slug: 'naruto', protectedRouteEnabled: true },
+        { id: 55, slug: '1185237596551512066' },
+        { comicPath: '/comics/133naruto2125' },
+      );
+      expect(path).toBe('/comics/133naruto2125/chapters/1185237596551512066');
     });
   });
 

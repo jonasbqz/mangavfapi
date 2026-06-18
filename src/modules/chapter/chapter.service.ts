@@ -159,40 +159,14 @@ export class ChapterService {
       throw new NotFoundException('Comic not found');
     }
 
-    if (comic.protectedRouteEnabled) {
-      if (!parsedChapter.hasRandom || !parsedChapter.random) {
-        throw this.routeProtectionService.createUnavailableException();
-      }
-
-      const chapter = await this.findChapterBySlugInComic(
-        comic.id,
-        parsedChapter.chapterSlug,
-      );
-      if (!chapter) {
-        throw this.routeProtectionService.createUnavailableException();
-      }
-
-      const isValidRandom = await this.routeProtectionService.validateChapterRandom(
-        chapter.id,
-        parsedChapter.random,
-      );
-      if (!isValidRandom) {
-        throw this.routeProtectionService.createUnavailableException();
-      }
-
-      const navigation = await this.getNavigation(chapter.id);
-      return { comic, navigation };
-    }
-
-    if (parsedChapter.hasRandom) {
-      throw new NotFoundException('Chapter not found');
-    }
-
     const chapter = await this.findChapterBySlugInComic(
       comic.id,
       parsedChapter.chapterSlug,
     );
     if (!chapter) {
+      if (comic.protectedRouteEnabled) {
+        throw this.routeProtectionService.createUnavailableException();
+      }
       throw new NotFoundException('Chapter not found');
     }
 

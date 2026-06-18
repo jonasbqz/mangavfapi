@@ -9,13 +9,10 @@ import { DATABASE_CONNECTION } from '@/database/database.module';
 import { comics } from '@/database/schema';
 import type * as schema from '@/database/schema';
 
-const CHAPTER_RANDOM_TTL_MS = 3 * 24 * 60 * 60 * 1000;
 const COMIC_SLUG_ROTATION_CRON = '0 0 */3 * *';
 const COMIC_SLUG_PREFIX_DIGITS = 3;
 const COMIC_SLUG_SUFFIX_DIGITS = 4;
 const COMIC_SLUG_RANDOM_MAX_ATTEMPTS = 10;
-const CHAPTER_SEGMENT_PREFIX = '90-';
-const CHAPTER_SEGMENT_RANDOM_DIGITS = 7;
 const UNAVAILABLE_MESSAGE =
   'No fue posible encontrar ese contenido ahora. Puedes volver y buscar otro contenido.';
 
@@ -89,32 +86,7 @@ export class RouteProtectionService {
     random: string | null;
     hasRandom: boolean;
   } {
-    if (!segment.startsWith(CHAPTER_SEGMENT_PREFIX)) {
-      return { chapterSlug: segment, random: null, hasRandom: false };
-    }
-
-    const remainder = segment.slice(CHAPTER_SEGMENT_PREFIX.length);
-    const lastDashIndex = remainder.lastIndexOf('-');
-    if (lastDashIndex === -1) {
-      return { chapterSlug: remainder, random: null, hasRandom: false };
-    }
-
-    const candidateRandom = remainder.slice(lastDashIndex + 1);
-    if (!/^\d+$/.test(candidateRandom)) {
-      return { chapterSlug: segment, random: null, hasRandom: false };
-    }
-
-    const expectedLength = COMIC_SLUG_PREFIX_DIGITS + COMIC_SLUG_SUFFIX_DIGITS;
-    if (candidateRandom.length !== expectedLength) {
-      return { chapterSlug: remainder, random: null, hasRandom: false };
-    }
-
-    const chapterSlug = remainder.slice(0, lastDashIndex);
-    if (!chapterSlug) {
-      return { chapterSlug: segment, random: null, hasRandom: false };
-    }
-
-    return { chapterSlug, random: candidateRandom, hasRandom: true };
+    return { chapterSlug: segment, random: null, hasRandom: false };
   }
 
   async getComicPath(comic: ProtectedComicShape): Promise<string> {
@@ -127,39 +99,7 @@ export class RouteProtectionService {
     options?: { comicPath?: string },
   ): Promise<string> {
     const comicPath = options?.comicPath || (await this.getComicPath(comic));
-    const basePath = `${comicPath}/chapters/${CHAPTER_SEGMENT_PREFIX}${chapter.slug}`;
-
-    if (!this.isProtected(comic)) {
-      return basePath;
-    }
-
-    const random = await this.getOrCreateChapterRandom(chapter.id);
-    return `${basePath}-${random}`;
-  }
-
-  async validateChapterRandom(
-    chapterId: number,
-    random: string,
-  ): Promise<boolean> {
-    const cached = await this.cacheService.get<string>(
-      this.getChapterRandomCacheKey(chapterId),
-    );
-    if (cached && cached === random) {
-      return true;
-    }
-    const fallback = await this.getOrCreateChapterRandom(chapterId);
-    return fallback === random;
-  }
-
-  async getOrCreateChapterRandom(chapterId: number): Promise<string> {
-    const cacheKey = this.getChapterRandomCacheKey(chapterId);
-    const cached = await this.cacheService.get<string>(cacheKey);
-    if (cached) {
-      return cached;
-    }
-    const fresh = this.generateChapterRandom();
-    await this.cacheService.set(cacheKey, fresh, CHAPTER_RANDOM_TTL_MS);
-    return fresh;
+    return `${comicPath}/chapters/${chapter.slug}`;
   }
 
   @Cron(COMIC_SLUG_ROTATION_CRON)
@@ -279,17 +219,6 @@ export class RouteProtectionService {
     const max = 10 ** COMIC_SLUG_SUFFIX_DIGITS;
     const min = 10 ** (COMIC_SLUG_SUFFIX_DIGITS - 1);
     return randomInt(min, max).toString();
-  }
-
-  private generateChapterRandom(): string {
-    const total = COMIC_SLUG_PREFIX_DIGITS + COMIC_SLUG_SUFFIX_DIGITS;
-    const max = 10 ** total;
-    const min = 10 ** (total - 1);
-    return randomInt(min, max).toString();
-  }
-
-  private getChapterRandomCacheKey(chapterId: number): string {
-    return `route:chapter:random:${chapterId}`;
   }
 
   private getHeaderValue(headers: HeadersLike, name: string): string {
