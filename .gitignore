@@ -1,5 +1,7 @@
 # Dependencies
 node_modules/
+# Project is bun-only; the npm lockfile is intentionally not tracked.
+package-lock.json
 
 # Build
 dist/
