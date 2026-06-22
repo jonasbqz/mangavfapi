@@ -193,17 +193,21 @@ export class ChapterService {
         throw this.routeProtectionService.createUnavailableException();
       }
     } else {
-      // Unprotected routes expose the chapter ID in the URL.
-      const numericId = Number.parseInt(parsedChapter.chapterSlug, 10);
-      if (Number.isFinite(numericId) && numericId > 0) {
-        chapter = await this.findChapterInComicById(comic.id, numericId);
-      }
+      // Unprotected routes use the chapter DB id in the URL. Legacy URLs may
+      // carry the Olympus slug (a 15-19 digit Snowflake ID) instead. We try
+      // the slug first because parseInt on a Snowflake ID loses precision
+      // (Number.MAX_SAFE_INTEGER = 2^53 ≈ 9 quadrillion, Snowflake IDs exceed
+      // it) and would look up a wrong chapter ID, wasting a DB round-trip.
+      chapter = await this.findChapterBySlugInComic(
+        comic.id,
+        parsedChapter.chapterSlug,
+      );
       if (!chapter) {
-        // Fallback: legacy URLs may carry the slug instead of the ID.
-        chapter = await this.findChapterBySlugInComic(
-          comic.id,
-          parsedChapter.chapterSlug,
-        );
+        // Fallback: the URL might carry the DB chapter id (current format).
+        const numericId = Number.parseInt(parsedChapter.chapterSlug, 10);
+        if (Number.isFinite(numericId) && numericId > 0 && numericId <= Number.MAX_SAFE_INTEGER) {
+          chapter = await this.findChapterInComicById(comic.id, numericId);
+        }
       }
       if (!chapter) {
         throw new NotFoundException('Chapter not found');
