@@ -1,0 +1,6 @@
+{
+  "$schema": "https://schema.railpack.com",
+  "deploy": {
+    "startCommand": "bun run db:migrate:all && nest build && bun scripts/build-engagement-script.ts && bun dist/src/main.js"
+  }
+}

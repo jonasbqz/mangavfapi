@@ -1,0 +1,2 @@
+[start]
+cmd = "bun run db:migrate:all && nest build && bun scripts/build-engagement-script.ts && bun dist/src/main.js"
