@@ -22,6 +22,18 @@ async function main(): Promise<void> {
 
   const pool = new Pool({ connectionString: databaseUrl });
   try {
+    const tableCheck = await pool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'drizzle' AND table_name = '__drizzle_migrations'
+      );
+    `);
+
+    if (!tableCheck.rows[0].exists) {
+      console.log('[stamp] Table drizzle.__drizzle_migrations does not exist. Skipping stamp as drizzle-kit migrate will handle it.');
+      return;
+    }
+
     const existing = await pool.query(
       'SELECT id FROM drizzle.__drizzle_migrations WHERE created_at = $1 OR hash = $2',
       [MIGRATION_CREATED_AT, hash],
