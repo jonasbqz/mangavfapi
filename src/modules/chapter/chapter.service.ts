@@ -7,6 +7,17 @@ import type * as schema from '@/database/schema';
 import { CacheService, CACHE_TTL, CACHE_KEYS } from '@/cache/cache.service';
 import { RouteProtectionService } from '@/modules/route-protection/route-protection.service';
 
+// Postgres `integer` column max value. Any ID exceeding this would cause
+// "value is out of range for type integer" errors at the DB level. Olympus
+// Snowflake IDs (15-19 digits) far exceed this, so we short-circuit early.
+const PG_INTEGER_MAX = 2147483647;
+
+// Returns true if the value is a safe integer that fits in a Postgres
+// integer column. Used to guard all numeric ID lookups.
+function isSafePgInteger(value: number): boolean {
+  return Number.isInteger(value) && value > 0 && value <= PG_INTEGER_MAX;
+}
+
 @Injectable()
 export class ChapterService {
   constructor(
@@ -29,6 +40,12 @@ export class ChapterService {
   }
 
   async findChapterInComicById(comicId: number, chapterId: number) {
+    // Guard: reject IDs that exceed Postgres integer range (Olympus
+    // Snowflake IDs). Prevents "out of range for type integer" DB errors.
+    if (!isSafePgInteger(chapterId)) {
+      return null;
+    }
+
     const scanRows = await this.db
       .select({ id: comicScans.id })
       .from(comicScans)
@@ -118,6 +135,13 @@ export class ChapterService {
   }
 
   async getNavigation(chapterId: number) {
+    // Guard: reject IDs that exceed Postgres integer range. This covers
+    // all controller endpoints that pass parsed IDs directly (lookupById,
+    // route params, etc.) without needing to guard each one individually.
+    if (!isSafePgInteger(chapterId)) {
+      throw new NotFoundException('Chapter not found');
+    }
+
     const cacheKey = `${CACHE_KEYS.CHAPTER_NAVIGATION}:${chapterId}`;
 
     return this.cacheService.wrap(

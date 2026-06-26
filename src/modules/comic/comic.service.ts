@@ -8,6 +8,14 @@ import { CacheService, CACHE_TTL, CACHE_KEYS } from '@/cache/cache.service';
 import { RouteProtectionService } from '@/modules/route-protection/route-protection.service';
 import { mapWithConcurrency } from '@/lib/async';
 
+// Postgres `integer` column max value. Olympus Snowflake IDs (15-19 digits)
+// exceed this, so we guard all numeric ID lookups to prevent DB errors.
+const PG_INTEGER_MAX = 2147483647;
+
+function isSafePgInteger(value: number): boolean {
+  return Number.isInteger(value) && value > 0 && value <= PG_INTEGER_MAX;
+}
+
 // Adult genre slugs - used to automatically mark comics as NSFW
 // Note: ecchi and smut are NOT considered adult content
 export const ADULT_GENRE_SLUGS = [
@@ -139,6 +147,10 @@ export class ComicService {
   }
 
   async findLookupById(id: number) {
+    if (!isSafePgInteger(id)) {
+      throw new NotFoundException('Comic not found');
+    }
+
     const comic = await this.db.query.comics.findFirst({
       where: eq(comics.id, id),
       columns: {
@@ -445,6 +457,10 @@ export class ComicService {
   }
 
   async findById(id: number) {
+    if (!isSafePgInteger(id)) {
+      throw new NotFoundException('Comic not found');
+    }
+
     const cacheKey = `${CACHE_KEYS.COMIC_DETAIL}:${id}`;
 
     return this.cacheService.wrap(
