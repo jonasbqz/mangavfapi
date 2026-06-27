@@ -30,6 +30,11 @@ async function clean() {
     await client.query('GRANT ALL ON SCHEMA public TO postgres');
     await client.query('GRANT ALL ON SCHEMA public TO public');
     console.log('Recreated public schema successfully');
+
+    // Enable extensions in the public schema
+    await client.query('CREATE EXTENSION IF NOT EXISTS pg_trgm SCHEMA public');
+    await client.query('CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA public');
+    console.log('Extensions pg_trgm and pgcrypto enabled in public schema');
     
     console.log('Database is now completely clean!');
   } catch (err: any) {
