@@ -12,7 +12,7 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiTags, ApiQuery } from '@nestjs/swagger';
 import { AuthGuard } from '@/modules/auth/auth.guard';
 import { ProfileGuard } from '@/modules/auth/profile.guard';
-import { CurrentUser, UserSession } from '@/modules/auth/current-user.decorator';
+import { CurrentUser, type UserSession } from '@/modules/auth/current-user.decorator';
 import { enrichEntriesWithPaths } from '@/lib/enrich-paths';
 import { ReadingHistoryService } from './reading-history.service';
 import { RecordReadingDto } from './reading-history.dto';

@@ -14,7 +14,7 @@ import { FastifyRequest } from 'fastify';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '@/modules/auth/auth.guard';
 import { ProfileGuard } from '@/modules/auth/profile.guard';
-import { CurrentUser, UserSession } from '@/modules/auth/current-user.decorator';
+import { CurrentUser, type UserSession } from '@/modules/auth/current-user.decorator';
 import { MediaService } from './media.service';
 import {
   CreateUploadSessionDto,

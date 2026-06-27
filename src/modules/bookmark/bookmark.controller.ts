@@ -14,7 +14,7 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiTags, ApiQuery } from '@nestjs/swagger';
 import { AuthGuard } from '@/modules/auth/auth.guard';
 import { ProfileGuard } from '@/modules/auth/profile.guard';
-import { CurrentUser, UserSession } from '@/modules/auth/current-user.decorator';
+import { CurrentUser, type UserSession } from '@/modules/auth/current-user.decorator';
 import { enrichBookmarksWithPaths } from '@/lib/enrich-paths';
 import { BookmarkService } from './bookmark.service';
 import { CreateBookmarkDto, UpdateBookmarkDto } from './bookmark.dto';

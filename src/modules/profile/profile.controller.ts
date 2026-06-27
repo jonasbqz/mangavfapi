@@ -19,7 +19,7 @@ import type { FastifyRequest } from 'fastify';
 import { AuthGuard } from '@/modules/auth/auth.guard';
 import { ProfileGuard } from '@/modules/auth/profile.guard';
 import { VerifiedEmailGuard } from '@/modules/auth/verified-email.guard';
-import { CurrentUser, UserSession } from '@/modules/auth/current-user.decorator';
+import { CurrentUser, type UserSession } from '@/modules/auth/current-user.decorator';
 import { ProfileService } from './profile.service';
 import { CreateProfileDto, UpdateProfileDto } from './profile.dto';
 import { SubscriptionsService } from '@/modules/subscriptions/subscriptions.service';

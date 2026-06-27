@@ -12,7 +12,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { FastifyRequest } from 'fastify';
 import { AuthGuard } from '@/modules/auth/auth.guard';
 import { ProfileGuard } from '@/modules/auth/profile.guard';
-import { CurrentUser, UserSession } from '@/modules/auth/current-user.decorator';
+import { CurrentUser, type UserSession } from '@/modules/auth/current-user.decorator';
 import { SessionResolverService } from '@/modules/auth/session-resolver';
 import { EntityReactionsService } from './entity-reactions.service';
 
