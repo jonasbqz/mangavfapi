@@ -6,7 +6,7 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
-import { FastifyReply } from 'fastify';
+import type { FastifyReply } from 'fastify';
 import { isDatabaseConnectionError } from '@/lib/db-pool';
 
 function formatErrorChain(error: unknown): string {
