@@ -66,6 +66,15 @@ async function main() {
       console.log(`[CLEANUP] Deleted all ${deletedAll.length} comics as no scans exist in the database.`);
     }
 
+    // 4. Delete all chapters that were scraped with 0 pages (empty url_pages array) so they can be re-scraped properly
+    const deletedEmptyChapters = await db.execute(sql`
+      DELETE FROM chapters
+      WHERE url_pages IS NULL 
+         OR jsonb_array_length(url_pages) = 0 
+         OR url_pages::text = '[]'
+    `);
+    console.log(`[CLEANUP] Deleted empty chapters (0 pages) to force them to be re-scraped.`);
+
     console.log('Database cleanup completed successfully.');
   } catch (error) {
     console.error('Error during DB cleanup:', error);
