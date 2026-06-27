@@ -13,7 +13,7 @@ import {
 } from '@nestjs/common';
 import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { ChapterService } from './chapter.service';
-import { ComicService } from '../comic/comic.service';
+import { ComicService } from '@/modules/comic/comic.service';
 import { DATABASE_CONNECTION } from '@/database/database.module';
 import { eq } from 'drizzle-orm';
 import { profiles } from '@/database/schema';
@@ -21,9 +21,9 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '@/database/schema';
 import type { FastifyRequest } from 'fastify';
 import { SessionResolverService } from '@/modules/auth/session-resolver';
-import { JwtDownloadService } from '../jwt-download/jwt-download.service';
-import { RouteProtectionService } from '../route-protection/route-protection.service';
-import { TrafficEventsService } from '../traffic/traffic-events.service';
+import { JwtDownloadService } from '@/modules/jwt-download/jwt-download.service';
+import { RouteProtectionService } from '@/modules/route-protection/route-protection.service';
+import { TrafficEventsService } from '@/modules/traffic/traffic-events.service';
 
 /** Allowed count values for the bulk next-chapters endpoint */
 const ALLOWED_COUNTS = [5, 10, 25, 50] as const;

@@ -15,7 +15,7 @@ import { AdminGuard } from '@/modules/auth/admin.guard';
 import { RouteProtectionService } from '@/modules/route-protection/route-protection.service';
 import type { FastifyRequest } from 'fastify';
 import { SearchAbuseService } from './search-abuse.service';
-import { TrafficEventsService } from '../traffic/traffic-events.service';
+import { TrafficEventsService } from '@/modules/traffic/traffic-events.service';
 
 const MAX_LOOKUP_BATCH_IDS = 50;
 
