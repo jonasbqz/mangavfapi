@@ -332,7 +332,7 @@ export class OlympusAdapter extends BaseScraperAdapter {
     const pages = nuxtData.filter(
       (item): item is string =>
         typeof item === 'string' &&
-        item.includes('/storage/comics/') &&
+        item.includes('/comics/') &&
         /\.(webp|jpg|jpeg|png)$/i.test(item),
     );
 
