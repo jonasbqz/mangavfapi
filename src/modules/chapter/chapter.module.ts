@@ -1,11 +1,11 @@
 import { Module, forwardRef } from '@nestjs/common';
-import { AuthModule } from '../auth/auth.module';
-import { JwtDownloadModule } from '../jwt-download/jwt-download.module';
+import { AuthModule } from '@/modules/auth/auth.module';
+import { JwtDownloadModule } from '@/modules/jwt-download/jwt-download.module';
 import { ChapterController } from './chapter.controller';
 import { ChapterService } from './chapter.service';
-import { ComicModule } from '../comic/comic.module';
-import { RouteProtectionModule } from '../route-protection/route-protection.module';
-import { TrafficEventsModule } from '../traffic/traffic-events.module';
+import { ComicModule } from '@/modules/comic/comic.module';
+import { RouteProtectionModule } from '@/modules/route-protection/route-protection.module';
+import { TrafficEventsModule } from '@/modules/traffic/traffic-events.module';
 
 @Module({
   imports: [

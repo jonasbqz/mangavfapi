@@ -1,10 +1,11 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '@/modules/auth/auth.module';
+import { RedisCacheModule } from '@/cache/cache.module';
 import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
 
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, RedisCacheModule],
   controllers: [NotificationsController],
   providers: [NotificationsService],
   exports: [NotificationsService],
