@@ -7,7 +7,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import fastifyCookie from '@fastify/cookie';
 import fastifyHelmet from '@fastify/helmet';
-import type { FastifyRequest, FastifyReply } from 'fastify';
+
 import { AppModule } from '@/app.module';
 import { parseCorsOrigins } from '@/lib/cors-origins';
 import { SanitizePipe } from '@/common/pipes';
@@ -35,8 +35,8 @@ function parseJsonBody(body: Buffer, done: (error: Error | null, body?: unknown)
 
 // Helper function to handle better-auth requests using raw Node.js response
 async function handleBetterAuth(
-  request: FastifyRequest,
-  reply: FastifyReply,
+  request: any,
+  reply: any,
   handler: ReturnType<typeof toNodeHandler>,
 ): Promise<void> {
   // Hijack the reply to take full control
@@ -92,7 +92,7 @@ async function bootstrap() {
     'application/json',
     true,
     { bodyLimit: 10 * 1024 * 1024 },
-    (_request: FastifyRequest, body: Buffer, done: (error: Error | null, body?: unknown) => void) =>
+    (_request: any, body: Buffer, done: (error: Error | null, body?: unknown) => void) =>
       parseJsonBody(body, done),
   );
 
