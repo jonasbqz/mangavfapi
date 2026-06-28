@@ -51,7 +51,7 @@ async function main() {
     if (activeComicIds.length > 0) {
       const deletedOrphans = await db
         .delete(comics)
-        .where(notInArray(comics.id, activeComicIds))
+        .where(sql`id NOT IN (${sql.raw(activeComicIds.join(','))})`)
         .returning({ id: comics.id, title: comics.title });
 
       if (deletedOrphans.length > 0) {
