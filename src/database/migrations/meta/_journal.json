@@ -43,13 +43,6 @@
       "when": 1774092040341,
       "tag": "0005_gorgeous_vivisector",
       "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "7",
-      "when": 1782685431007,
-      "tag": "0006_medical_spiral",
-      "breakpoints": true
     }
   ]
 }
